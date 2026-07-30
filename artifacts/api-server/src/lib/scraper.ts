@@ -1600,8 +1600,8 @@ export async function scrapeFamilyPornHD(pagesCount = 3): Promise<void> {
   let totalSaved  = 0;
 
   for (let page = 1; page <= pagesCount; page++) {
-    // familypornhd.com uses /?page=N for pagination
-    const listUrl = page === 1 ? `${FPHD_BASE}/` : `${FPHD_BASE}/?page=${page}`;
+    // familypornhd.com uses WordPress standard /page/N/ pagination (NOT /?page=N which 301s to homepage)
+    const listUrl = page === 1 ? `${FPHD_BASE}/` : `${FPHD_BASE}/page/${page}/`;
     const html    = await fetchHtmlFrom(listUrl, FPHD_BASE);
     if (!html) {
       process.stdout.write(`[FAMILYPORNHD] Page ${page} — fetch failed, skipping\n`);
@@ -1691,10 +1691,10 @@ export async function scrapeFamilyPornHD(pagesCount = 3): Promise<void> {
       });
     }
 
-    // Apply TABOO_KEYWORDS gate and build candidate list
+    // familypornhd.com is a pure family/taboo niche site — every video is on-topic.
+    // TABOO_KEYWORDS filter is intentionally bypassed: the source domain is the relevance gate.
+    // MIN_DURATION_SECONDS is also relaxed (accept 0 = unknown duration from listing page).
     for (const { href, title, thumb, durText } of videoLinks) {
-      if (!TABOO_KEYWORDS.some((kw) => title.toLowerCase().includes(kw))) continue;
-
       const durationSeconds = parseDurationText(durText);
       if (durationSeconds > 0 && durationSeconds < MIN_DURATION_SECONDS) continue;
 
