@@ -184,6 +184,34 @@ async function restoreFromBackupIfNeeded(): Promise<void> {
   logger.info({ restored }, "RESTORE: videos reloaded from backup.json");
 }
 
+// ---------------------------------------------------------------------------
+// purgeFullHDPorn — surgical removal of all fullhdporn.sex indexed rows
+// Runs AFTER backup restore so that any rows re-introduced by backup.json
+// are immediately cleaned up before any page serves them.
+// ---------------------------------------------------------------------------
+
+async function purgeFullHDPorn(): Promise<void> {
+  try {
+    const result = await db.execute(
+      sql`DELETE FROM pf_videos WHERE embed_url ILIKE ${"%" + "fullhdporn.sex" + "%"}`,
+    );
+    const deleted = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+    if (deleted > 0) {
+      process.stdout.write(
+        `[CLEANUP] ✅ Purged ${deleted} fullhdporn.sex rows — broken players removed.\n`,
+      );
+      logger.info({ deleted }, "purgeFullHDPorn: stale rows deleted");
+    } else {
+      process.stdout.write(`[CLEANUP] No fullhdporn.sex rows found — DB is clean.\n`);
+    }
+  } catch (err) {
+    process.stdout.write(
+      `[CLEANUP] ⚠️  fullhdporn.sex purge failed: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    logger.error({ err }, "purgeFullHDPorn: delete failed");
+  }
+}
+
 async function writeBackup(): Promise<void> {
   try {
     const rows = await db.select().from(videosTable);
@@ -259,11 +287,11 @@ async function checkDatabase(): Promise<boolean> {
 
     try {
       const purge = await db.execute(
-        sql`DELETE FROM pf_videos WHERE embed_url ILIKE ${"%" + "tabooporn.to" + "%"} OR slug LIKE ${"tp-%"} OR embed_url ILIKE ${"%" + "porndupe.com" + "%"} OR embed_url ILIKE ${"%" + "4kporno.xxx" + "%"} OR embed_url ILIKE ${"%" + "fullhdporn.sex" + "%"}`,
+        sql`DELETE FROM pf_videos WHERE embed_url ILIKE ${"%" + "tabooporn.to" + "%"} OR slug LIKE ${"tp-%"} OR embed_url ILIKE ${"%" + "porndupe.com" + "%"} OR embed_url ILIKE ${"%" + "4kporno.xxx" + "%"}`,
       );
       const deleted = (purge as unknown as { rowCount?: number }).rowCount ?? 0;
       if (deleted > 0) {
-        process.stdout.write(`[CLEANUP] Purged ${deleted} broken rows (tabooporn.to / porndupe.com / 4kporno.xxx / fullhdporn.sex) from DB.\n`);
+        process.stdout.write(`[CLEANUP] Purged ${deleted} broken rows (tabooporn.to / porndupe.com / 4kporno.xxx) from DB.\n`);
       }
     } catch (_purgeErr) {
       process.stdout.write(`[CLEANUP] Stale-URL purge skipped — ${_purgeErr instanceof Error ? _purgeErr.message : String(_purgeErr)}\n`);
@@ -378,6 +406,7 @@ app.listen(port, (err?: Error) => {
         );
 
         restoreFromBackupIfNeeded()
+          .then(() => purgeFullHDPorn())
           .then(() => startBackupInterval())
           .catch((err: unknown) =>
             logger.error({ err }, "Backup restore/interval setup failed"),
