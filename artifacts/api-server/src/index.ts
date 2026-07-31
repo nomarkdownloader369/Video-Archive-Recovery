@@ -190,6 +190,41 @@ async function restoreFromBackupIfNeeded(): Promise<void> {
 // are immediately cleaned up before any page serves them.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// purgeFamilyPornHDRows — drop all rows sourced from familypornhd.com so they
+// can be re-scraped immediately with the corrected, sidebar-free tag extractor.
+// Matches on both the embed_url domain and the "fphd-" slug prefix so that
+// rows restored from backup.json with stale generic tags are also removed.
+// ---------------------------------------------------------------------------
+
+async function purgeFamilyPornHDRows(): Promise<void> {
+  try {
+    const result = await db.execute(
+      sql`DELETE FROM pf_videos
+          WHERE embed_url ILIKE ${"%" + "familypornhd.com" + "%"}
+             OR slug LIKE ${"fphd-%"}`,
+    );
+    const deleted = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+    if (deleted > 0) {
+      process.stdout.write(
+        `[CLEANUP] ✅ Purged ${deleted} familypornhd.com rows — will be re-scraped with clean tags.\n`,
+      );
+      logger.info({ deleted }, "purgeFamilyPornHDRows: stale rows deleted for re-scrape");
+    } else {
+      process.stdout.write(`[CLEANUP] No familypornhd.com rows found — nothing to purge.\n`);
+    }
+  } catch (err) {
+    // Re-throw so the startup chain breaks and the FamilyPornHD backfill does
+    // NOT start — starting it while stale rows remain would leave them in place
+    // because slug deduplication silently skips re-inserts.
+    process.stdout.write(
+      `[CLEANUP] ⚠️  familypornhd.com purge failed — FamilyPornHD backfill will NOT start to prevent stale-row contamination: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    logger.error({ err }, "purgeFamilyPornHDRows: delete failed — re-throwing to abort backfill");
+    throw err;
+  }
+}
+
 async function purgeFullHDPorn(): Promise<void> {
   try {
     const result = await db.execute(
@@ -405,43 +440,52 @@ app.listen(port, (err?: Error) => {
           logger.error({ err }, "autoTagRepair failed"),
         );
 
+        // Restore → purge stale rows → arm backup interval → then start backfill.
+        // The backfill is chained INSIDE the restore/purge promise so that
+        // purgeFamilyPornHDRows() is guaranteed to finish before any scraper
+        // begins inserting new rows (eliminates the delete-vs-insert race).
         restoreFromBackupIfNeeded()
           .then(() => purgeFullHDPorn())
-          .then(() => startBackupInterval())
+          .then(() => purgeFamilyPornHDRows())
+          .then(() => {
+            startBackupInterval();
+
+            process.stdout.write(
+              `\n🚀 BACKFILL: Launching studios · keywords · performers · FamilyPornHD concurrently\n` +
+              `   Studios: 28 whitelisted · 5 pages each\n` +
+              `   Keywords: ${EMPTY_CATEGORY_KEYWORDS.length} terms · 5 pages each\n` +
+              `   Performers: 33 stars · UNLIMITED pages\n` +
+              `   FamilyPornHD: 3 listing pages\n` +
+              `   isScraping=true — heartbeat armed, container kept alive\n\n`,
+            );
+
+            isScraping = true;
+
+            Promise.all([
+              scrapeByStudios(5),
+              scrapeByKeywords(EMPTY_CATEGORY_KEYWORDS, 5),
+              scrapeByPerformers(),
+              scrapeFamilyPornHD(3),
+            ])
+              .then(() => seedWhitelistedPerformers())
+              .then(() => {
+                isScraping = false;
+                process.stdout.write(
+                  `\n✅ BACKFILL COMPLETE: All sources done. isScraping=false — heartbeat will idle.\n\n`,
+                );
+              })
+              .catch((err: unknown) => {
+                isScraping = false;
+                logger.error({ err }, "Backfill (all sources) failed");
+                process.stdout.write(`\n🚨 BACKFILL ERROR: ${err instanceof Error ? err.message : String(err)}\n\n`);
+              });
+          })
           .catch((err: unknown) =>
-            logger.error({ err }, "Backup restore/interval setup failed"),
+            logger.error({ err }, "Backup restore/purge/interval setup failed"),
           );
 
-        process.stdout.write(
-          `\n🚀 BACKFILL: Launching studios · keywords · performers · FamilyPornHD concurrently\n` +
-          `   Studios: 28 whitelisted · 5 pages each\n` +
-          `   Keywords: ${EMPTY_CATEGORY_KEYWORDS.length} terms · 5 pages each\n` +
-          `   Performers: 33 stars · UNLIMITED pages\n` +
-          `   FamilyPornHD: 3 listing pages\n` +
-          `   isScraping=true — heartbeat armed, container kept alive\n\n`,
-        );
-
-        isScraping = true;
-
-        Promise.all([
-          scrapeByStudios(5),
-          scrapeByKeywords(EMPTY_CATEGORY_KEYWORDS, 5),
-          scrapeByPerformers(),
-          scrapeFamilyPornHD(3),
-        ])
-          .then(() => seedWhitelistedPerformers())
-          .then(() => {
-            isScraping = false;
-            process.stdout.write(
-              `\n✅ BACKFILL COMPLETE: All sources done. isScraping=false — heartbeat will idle.\n\n`,
-            );
-          })
-          .catch((err: unknown) => {
-            isScraping = false;
-            logger.error({ err }, "Backfill (all sources) failed");
-            process.stdout.write(`\n🚨 BACKFILL ERROR: ${err instanceof Error ? err.message : String(err)}\n\n`);
-          });
-
+        // Autopilot interval is armed immediately after DB check — it runs every
+        // 4 hours and does not need to wait for the initial backfill to finish.
         setInterval(() => {
           logger.info("Autopilot: triggering scheduled scrapeLatest + FamilyPornHD");
           Promise.all([

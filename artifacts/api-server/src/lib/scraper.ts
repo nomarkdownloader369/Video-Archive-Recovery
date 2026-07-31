@@ -1486,6 +1486,10 @@ const FPHD_DELAY_MS = 600;
  *      accepted when the URL does NOT point back to the bare familypornhd.com page.
  *
  * Any URL that still points to familypornhd.com (non-embed) is treated as null.
+ *
+ * Tag extraction is restricted to the video's own metadata block.
+ * Sidebar tag clouds, footer widget clouds, and channel/studio directory
+ * links are explicitly excluded.
  */
 function extractFamilyPornHDMeta(html: string): {
   embedUrl: string | null;
@@ -1553,29 +1557,153 @@ function extractFamilyPornHDMeta(html: string): {
     if (durText) durationSeconds = parseDurationText(durText);
   }
 
-  // Tags / categories
-  const tags: string[]    = [];
-  const tagSeen           = new Set<string>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $("a[href*='/category/'], a[href*='/categories/'], a[href*='/tag/'], a[href*='/tags/'], .tags a, .categories a, .video-tags a").each((_: number, el: any) => {
-    const t = $(el).text().trim().toLowerCase();
-    if (t && t.length > 1 && t.length < 50 && !tagSeen.has(t)) {
-      tagSeen.add(t);
-      tags.push(t);
-    }
-  });
+  // ---------------------------------------------------------------------------
+  // Tag / category extraction — STRICT: verified per-video container only.
+  //
+  // Rules enforced here:
+  //   1. Positive container anchor — only the first matching element from
+  //      VIDEO_META_CONTAINER_SELECTORS is searched.  If no selector matches,
+  //      we return [] rather than falling back to the whole document; a
+  //      whole-document scan would ingest sidebar/footer tag clouds whenever
+  //      the site's markup changes.
+  //   2. Excluded-container guard — always active, even inside a positive root,
+  //      because broad containers (article, .post-content) may wrap related-
+  //      video sections or inline sidebar widgets on some tube-site themes.
+  //   3. href guard — performer, model, studio, and channel links that happen
+  //      to share a /tag/ or /category/ path pattern are excluded by href.
+  //   4. GENERIC_TAG_BLOCKLIST — low-signal words filtered by exact match.
+  //   5. STUDIO_WHITELIST guard — studio brand names ("pervmom", "mylf" …)
+  //      are excluded; they appear as anchor text in channel-directory lists
+  //      that can sit inside broad positive roots.
+  //   6. Length guard — tags shorter than 2 chars or longer than 40 dropped.
+  // ---------------------------------------------------------------------------
 
-  // Performers
+  /**
+   * Priority list of positive selectors for the per-video metadata block.
+   * More-specific selectors come first to keep the scope as tight as possible.
+   * Broad containers (article, .post-content) are included last so excluded-
+   * container filtering catches subsections within them.
+   * The first match wins; if nothing matches, tag extraction is skipped.
+   */
+  const VIDEO_META_CONTAINER_SELECTORS = [
+    ".video-metadata",
+    ".video-info",
+    ".video-details",
+    ".video-meta",
+    ".post-meta",
+    ".entry-meta",
+    ".post-tags",
+    ".entry-tags",
+    ".tags-wrapper",
+    ".video-tags",
+    "article.post",
+    "article",
+    ".entry-content",
+    ".post-content",
+    ".main-content",
+    "#content",
+  ];
+
+  /** Ancestors that must NOT contain any tag link we accept. */
+  const EXCLUDED_CONTAINER_SEL =
+    "aside, .sidebar, footer, .footer, " +
+    ".widget, .widget-area, .widget-container, " +
+    ".tag-cloud, .wp-tag-cloud, .tagcloud, " +
+    ".best-channels, .channel-list, .studio-list, " +
+    ".related-videos, .related, .recommended, " +
+    "nav, .navigation, .nav, header";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function isInExcludedContainer(el: any): boolean {
+    return $(el).parents(EXCLUDED_CONTAINER_SEL).length > 0;
+  }
+
+  /** Generic words that appear as tag/category link text sitewide — not useful. */
+  const GENERIC_TAG_BLOCKLIST = new Set([
+    "categories", "category", "videos", "video", "tags", "tag", "all",
+    "hd", "full", "porn", "sex", "free", "watch", "more", "latest",
+    "popular", "top", "best", "new", "trending", "hot", "content",
+    "site", "home", "search", "browse", "gallery", "movies", "clips",
+  ]);
+
+  /**
+   * Validate a candidate tag text.
+   * Rejects: empty / too short / too long / generic sitewide words /
+   * whitelisted studio names (appear as "best channel" link text even
+   * inside article containers on some tube-site themes).
+   */
+  function isUsableTag(raw: string): boolean {
+    const t = raw.trim().toLowerCase();
+    if (!t || t.length < 2 || t.length > 40) return false;
+    if (GENERIC_TAG_BLOCKLIST.has(t)) return false;
+    if (STUDIO_WHITELIST.has(t)) return false; // e.g. "pervmom", "mylf"
+    return true;
+  }
+
+  // Find the tightest verified container for this page's video metadata.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let $metaRoot: any = null;
+  for (const sel of VIDEO_META_CONTAINER_SELECTORS) {
+    const $el = $(sel).first();
+    if ($el.length) { $metaRoot = $el; break; }
+  }
+
+  const tags: string[] = [];
+  const tagSeen        = new Set<string>();
+
+  // Only extract tags when a verified container was found.
+  // No whole-document fallback: an unrecognised page layout returns [].
+  if ($metaRoot) {
+    // Pass 1 — href-rooted selectors (most reliable on tube sites).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    $metaRoot.find("a[href*='/tag/'], a[href*='/tags/'], a[href*='/category/'], a[href*='/categories/']").each((_: number, el: any) => {
+      // Always apply exclusion guard even inside the positive root —
+      // broad containers (article, #content) may wrap sidebar subsections.
+      if (isInExcludedContainer(el)) return;
+      const href = $(el).attr("href") ?? "";
+      if (
+        href.includes("/model/") || href.includes("/models/") ||
+        href.includes("/pornstar/") || href.includes("/actress/") ||
+        href.includes("/studio/") || href.includes("/channel/")
+      ) return;
+      const t = $(el).text().trim().toLowerCase();
+      if (!isUsableTag(t)) return;
+      if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
+    });
+
+    // Pass 2 — class-based tag containers (site may use hash/JS routing for
+    // tag links so href-rooted pass returns nothing).
+    if (tags.length === 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      $metaRoot.find(".video-tags a, .video-categories a, .tags-list a, .tag-list a").each((_: number, el: any) => {
+        if (isInExcludedContainer(el)) return;
+        const t = $(el).text().trim().toLowerCase();
+        if (!isUsableTag(t)) return;
+        if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Performer extraction — scoped to $metaRoot; excluded-container guard active.
+  // ---------------------------------------------------------------------------
+
   const performers: string[] = [];
   const perfSeen             = new Set<string>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $("a[href*='/model/'], a[href*='/models/'], a[href*='/pornstar/'], a[href*='/actress/'], .models a, .pornstars a, .actors a").each((_: number, el: any) => {
-    const name = $(el).text().trim();
-    if (name && name.length > 1 && !perfSeen.has(name)) {
-      perfSeen.add(name);
-      performers.push(name);
-    }
-  });
+
+  if ($metaRoot) {
+    $metaRoot.find(
+      "a[href*='/model/'], a[href*='/models/'], a[href*='/pornstar/'], a[href*='/actress/'], .models a, .pornstars a, .actors a",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ).each((_: number, el: any) => {
+      if (isInExcludedContainer(el)) return;
+      const name = $(el).text().trim();
+      if (name && name.length > 1 && !perfSeen.has(name)) {
+        perfSeen.add(name);
+        performers.push(name);
+      }
+    });
+  }
 
   return { embedUrl, durationSeconds, tags, performers };
 }
