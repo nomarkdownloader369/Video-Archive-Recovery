@@ -1,25 +1,34 @@
 ---
 name: PervFlix setup
-description: Key lessons from registering the PervFlix artifacts after a GitHub import, where the Replit artifact system had no knowledge of existing artifact.toml files.
+description: Artifact registration and workflow setup lessons for the PervFlix project imported from GitHub.
 ---
 
-## The problem
-GitHub-imported projects have `artifact.toml` files on disk but no Replit artifact registrations. `listArtifacts()` returns empty. The proxy router (`router = "application"` in `.replit`) only routes to registered artifacts, so the dev domain returns 503.
+# PervFlix Setup Lessons
 
-## Fix sequence
-1. Extract real source from the attached zip (the git import zip in `attached_assets/`) — NOT from a directory backup taken after `createArtifact` runs, which only contains the scaffold.
-2. Remove `artifacts/<slug>/` directory, then call `createArtifact()` to get proper registration + managed workflow.
-3. Overwrite the scaffold's src with real source files from the zip.
-4. Kill any stale process holding the old port before restarting the managed workflow (`lsof -ti :<port> | xargs kill -9`).
+## Artifact registration on GitHub import
 
-## Vite proxy (required)
-The pervflix frontend calls `/api/pf/*`. The API server runs on port 8080 (separate managed workflow). In dev, Vite must proxy `/api` → `http://localhost:8080` in `vite.config.ts`'s `server.proxy`. Without this, `/api` calls go nowhere.
+When a project is imported from GitHub with existing `artifacts/<slug>/.replit-artifact/artifact.toml` files, the artifacts are NOT automatically registered with Replit's system — `listArtifacts()` returns `[]`.
 
-**Why:** The Replit proxy routes `/api` to the api-server artifact at the edge, but Vite's own dev server doesn't know about that routing — it only sees its own port. The proxy bridges the gap in development.
+**Why:** `createArtifact` is the only registration path. Existing artifact directories on disk are invisible to the platform until registered.
 
-## Ports
-- `artifacts/pervflix: web` → port 22141 (assigned by createArtifact)
-- `artifacts/api-server: API Server` → port 8080 (from artifact.toml)
+**How to apply:** To register an existing artifact without losing its source:
+1. Back up: `cp -r artifacts/<slug> /tmp/<slug>-backup`
+2. Delete: `rm -rf artifacts/<slug>`
+3. Register: `createArtifact({ artifactType, slug, previewPath, title })` — this creates a fresh scaffold AND registers it, creating managed workflows
+4. Restore original files over the scaffold (excluding `node_modules` and `.replit-artifact`)
+5. Run `pnpm install` to reconcile dependencies
+6. Use `WorkflowsRestart` with the managed workflow name from `result.workflows`
 
-## Real source location
-The original source lives in `attached_assets/PervFlix-Recovery25-main_*.zip` → `PervFlix-Recovery25-main/artifacts/pervflix/src/`.
+## API proxy in vite.config.ts
+
+The original pervflix vite.config.ts has a `/api` proxy to `localhost:8080`. When using managed artifact workflows, the Replit routing layer also handles `/api` → API server at the network level. The Vite proxy is still useful for local dev without the Replit layer, and does not conflict.
+
+## backup.json is source of truth
+
+`artifacts/api-server/backup.json` is the video index backup. On first boot with empty DB, it restores ~4,900+ rows automatically. Never delete it.
+
+## Managed workflow names
+
+- Frontend: `artifacts/pervflix: web`
+- API server: `artifacts/api-server: API Server`
+- Canvas/mockup: `artifacts/mockup-sandbox: Component Preview Server`
