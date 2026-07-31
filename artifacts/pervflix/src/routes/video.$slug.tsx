@@ -34,6 +34,13 @@ export const Route = createFileRoute("/video/$slug")({
   ),
 });
 
+/** Format raw seconds into "26M 44S" display label */
+function formatDuration(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}M ${String(s).padStart(2, "0")}S`;
+}
+
 /** Normalise "HD" to "1080P" for display */
 function displayQuality(q: string): string {
   if (!q || q === "HD") return "1080P";
@@ -159,6 +166,7 @@ function WatchPage() {
               ) : (
                 /* Iframe embed — dynamic referrer policy per source */
                 <iframe
+                  key={video.id}
                   src={video.embed_url}
                   title={video.title}
                   allowFullScreen
@@ -207,7 +215,17 @@ function WatchPage() {
                 {metadataQualityText}
               </span>
               <span className="text-muted-foreground">
-                {video.year} · {video.duration} · {video.views} views
+                {(() => {
+                  const dur =
+                    video.duration && video.duration !== "0:00"
+                      ? video.duration
+                      : video.duration_seconds > 0
+                        ? formatDuration(video.duration_seconds)
+                        : null;
+                  return [video.year, dur, `${video.views} views`]
+                    .filter(Boolean)
+                    .join(" · ");
+                })()}
               </span>
             </div>
             <h1

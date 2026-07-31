@@ -56,6 +56,7 @@ function mapDbVideo(v: DbVideo): Video {
     : rawQuality === "1080P" ? "1080p"
     : "HD";
   return {
+    id: v.id,
     slug: v.slug,
     title: v.title,
     studio: v.studio ?? "",
@@ -63,6 +64,7 @@ function mapDbVideo(v: DbVideo): Video {
     stars: v.pornstars ?? [],
     year: v.release_year ?? new Date(v.created_at).getFullYear(),
     duration,
+    duration_seconds: secs,
     views: formatViews(v.views ?? 0),
     quality,
     description: v.description ?? "",

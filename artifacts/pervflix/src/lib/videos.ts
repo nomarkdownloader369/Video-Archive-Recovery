@@ -1,4 +1,5 @@
 export type Video = {
+  id: number;
   slug: string;
   title: string;
   studio: string;
@@ -6,6 +7,7 @@ export type Video = {
   stars: string[];
   year: number;
   duration: string;
+  duration_seconds: number;
   views: string;
   quality: "4K" | "1080p" | "HD";
   description: string;
