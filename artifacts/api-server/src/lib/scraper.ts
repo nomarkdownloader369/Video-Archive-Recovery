@@ -1651,59 +1651,66 @@ function extractFamilyPornHDMeta(html: string): {
   const tags: string[] = [];
   const tagSeen        = new Set<string>();
 
-  // Only extract tags when a verified container was found.
-  // No whole-document fallback: an unrecognised page layout returns [].
-  if ($metaRoot) {
-    // Pass 1 — href-rooted selectors (most reliable on tube sites).
+  // ---------------------------------------------------------------------------
+  // Tag extraction — three targeted passes, most-specific selector first.
+  // All passes are scoped to $metaRoot when a verified container was found.
+  // No whole-document fallback: if no container matches, tags returns [].
+  // Excluded-container guard is always on even inside a positive root because
+  // broad containers (article, #content) may wrap related/sidebar subsections.
+  // ---------------------------------------------------------------------------
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function collectTags($scope: any, selector: string): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    $metaRoot.find("a[href*='/tag/'], a[href*='/tags/'], a[href*='/category/'], a[href*='/categories/']").each((_: number, el: any) => {
-      // Always apply exclusion guard even inside the positive root —
-      // broad containers (article, #content) may wrap sidebar subsections.
+    $scope.find(selector).each((_: number, el: any) => {
       if (isInExcludedContainer(el)) return;
       const href = $(el).attr("href") ?? "";
+      // Skip any link whose href resolves to a performer/studio/channel page
       if (
-        href.includes("/model/") || href.includes("/models/") ||
-        href.includes("/pornstar/") || href.includes("/actress/") ||
-        href.includes("/studio/") || href.includes("/channel/")
+        href.includes("/pornstar/") || href.includes("/model/") ||
+        href.includes("/models/")   || href.includes("/actress/") ||
+        href.includes("/studio/")   || href.includes("/channel/")
       ) return;
       const t = $(el).text().trim().toLowerCase();
       if (!isUsableTag(t)) return;
       if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
     });
+  }
 
-    // Pass 2 — class-based tag containers (site may use hash/JS routing for
-    // tag links so href-rooted pass returns nothing).
-    if (tags.length === 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      $metaRoot.find(".video-tags a, .video-categories a, .tags-list a, .tag-list a").each((_: number, el: any) => {
-        if (isInExcludedContainer(el)) return;
-        const t = $(el).text().trim().toLowerCase();
-        if (!isUsableTag(t)) return;
-        if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
-      });
-    }
+  if ($metaRoot) {
+    // Pass 1 — tightest: only anchors explicitly linking to a /tag/ path
+    //   inside a .video-metadata-item wrapper (WordPress custom field pattern).
+    collectTags($metaRoot, ".video-metadata-item a[href*='/tag/']");
+
+    // Pass 2 — common tube-site class for the video's own tag list.
+    if (tags.length === 0) collectTags($metaRoot, ".video-tags a");
+
+    // Pass 3 — alternate common class used by many WordPress tube themes.
+    if (tags.length === 0) collectTags($metaRoot, ".tag-list a, .tags-list a");
   }
 
   // ---------------------------------------------------------------------------
-  // Performer extraction — scoped to $metaRoot; excluded-container guard active.
+  // Performer extraction — whole-page a[href*="/pornstar/"] scan.
+  //
+  // "/pornstar/" hrefs are semantically specific (they point to a performer
+  // profile page) and are unlikely to appear as sidebar navigation noise.
+  // Scanning the full document rather than just $metaRoot ensures we catch
+  // performer links that some themes place outside the main article container.
+  // The excluded-container guard is still applied for belt-and-suspenders safety.
   // ---------------------------------------------------------------------------
 
   const performers: string[] = [];
   const perfSeen             = new Set<string>();
 
-  if ($metaRoot) {
-    $metaRoot.find(
-      "a[href*='/model/'], a[href*='/models/'], a[href*='/pornstar/'], a[href*='/actress/'], .models a, .pornstars a, .actors a",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ).each((_: number, el: any) => {
-      if (isInExcludedContainer(el)) return;
-      const name = $(el).text().trim();
-      if (name && name.length > 1 && !perfSeen.has(name)) {
-        perfSeen.add(name);
-        performers.push(name);
-      }
-    });
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  $("a[href*='/pornstar/']").each((_: number, el: any) => {
+    if (isInExcludedContainer(el)) return;
+    const name = $(el).text().trim();
+    if (name && name.length > 1 && !perfSeen.has(name)) {
+      perfSeen.add(name);
+      performers.push(name);
+    }
+  });
 
   return { embedUrl, durationSeconds, tags, performers };
 }
