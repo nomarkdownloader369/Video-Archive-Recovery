@@ -1727,9 +1727,9 @@ function extractFamilyPornHDMeta(html: string): {
  *
  * @param pagesCount Listing pages to crawl (default 3).
  */
-export async function scrapeFamilyPornHD(pagesCount = 3): Promise<void> {
-  logger.info({ pagesCount }, "scrapeFamilyPornHD: starting");
-  process.stdout.write(`\n[FAMILYPORNHD] Starting scrape — ${pagesCount} listing pages\n`);
+export async function scrapeFamilyPornHD(pagesCount = 3, breakOnEmpty = false): Promise<void> {
+  logger.info({ pagesCount, breakOnEmpty }, "scrapeFamilyPornHD: starting");
+  process.stdout.write(`\n[FAMILYPORNHD] Starting scrape — up to ${pagesCount} listing pages${breakOnEmpty ? " (stop on first empty page)" : ""}\n`);
 
   const seenSlugs = new Set<string>();
   let totalSaved  = 0;
@@ -1870,6 +1870,10 @@ export async function scrapeFamilyPornHD(pagesCount = 3): Promise<void> {
 
     if (candidates.length === 0) {
       process.stdout.write(`[FAMILYPORNHD] Page ${page} — 0 candidates after taboo filter\n`);
+      if (breakOnEmpty) {
+        process.stdout.write(`[FAMILYPORNHD] breakOnEmpty=true — stopping deep crawl at page ${page} (end of archive reached)\n`);
+        break;
+      }
       await delay(FPHD_DELAY_MS);
       continue;
     }

@@ -199,19 +199,26 @@ async function restoreFromBackupIfNeeded(): Promise<void> {
 
 async function purgeFamilyPornHDRows(): Promise<void> {
   try {
+    // Surgical delete: only remove fphd rows that have empty performer arrays
+    // or empty tag arrays (stale scrapes with missing metadata).
+    // Rows that already have clean performers+tags are left untouched.
     const result = await db.execute(
       sql`DELETE FROM pf_videos
-          WHERE embed_url ILIKE ${"%" + "familypornhd.com" + "%"}
-             OR slug LIKE ${"fphd-%"}`,
+          WHERE (embed_url ILIKE ${"%" + "familypornhd.com" + "%"}
+              OR slug LIKE ${"fphd-%"})
+            AND (
+              cardinality(pornstars) = 0
+              OR cardinality(tags)   = 0
+            )`,
     );
     const deleted = (result as unknown as { rowCount?: number }).rowCount ?? 0;
     if (deleted > 0) {
       process.stdout.write(
-        `[CLEANUP] ✅ Purged ${deleted} familypornhd.com rows — will be re-scraped with clean tags.\n`,
+        `[CLEANUP] ✅ Surgically purged ${deleted} familypornhd.com rows with empty performers/tags — will be re-scraped with clean metadata.\n`,
       );
-      logger.info({ deleted }, "purgeFamilyPornHDRows: stale rows deleted for re-scrape");
+      logger.info({ deleted }, "purgeFamilyPornHDRows: stale rows (empty performers/tags) deleted for re-scrape");
     } else {
-      process.stdout.write(`[CLEANUP] No familypornhd.com rows found — nothing to purge.\n`);
+      process.stdout.write(`[CLEANUP] No familypornhd.com rows with empty performers/tags found — DB is already clean.\n`);
     }
   } catch (err) {
     // Re-throw so the startup chain breaks and the FamilyPornHD backfill does
