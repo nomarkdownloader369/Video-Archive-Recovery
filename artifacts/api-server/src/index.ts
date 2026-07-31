@@ -199,26 +199,36 @@ async function restoreFromBackupIfNeeded(): Promise<void> {
 
 async function purgeFamilyPornHDRows(): Promise<void> {
   try {
-    // Surgical delete: only remove fphd rows that have empty performer arrays
-    // or empty tag arrays (stale scrapes with missing metadata).
-    // Rows that already have clean performers+tags are left untouched.
+    // Surgical delete — remove all fphd rows that carry stale/redundant metadata
+    // from previous scrape runs so the updated parser can re-scrape them cleanly.
+    //
+    // Conditions (any one is sufficient):
+    //   1. No performers recorded (pornstars is empty)
+    //   2. No tags recorded (tags is empty)
+    //   3. Tags contain only the generic defaults injected by the old scraper
+    //      (e.g. ['taboo'], ['family'], ['taboo','family'] — no scene-specific tags)
+    //
+    // Rows that already have clean performers + specific tags are left untouched.
     const result = await db.execute(
       sql`DELETE FROM pf_videos
-          WHERE (embed_url ILIKE ${"%" + "familypornhd.com" + "%"}
-              OR slug LIKE ${"fphd-%"})
-            AND (
-              cardinality(pornstars) = 0
-              OR cardinality(tags)   = 0
-            )`,
+          WHERE (
+            embed_url ILIKE ${"%" + "familypornhd.com" + "%"}
+            OR slug LIKE ${"fphd-%"}
+          )
+          AND (
+            cardinality(pornstars) = 0
+            OR cardinality(tags)   = 0
+            OR tags <@ ARRAY['taboo','family','step-family','step','incest']::text[]
+          )`,
     );
     const deleted = (result as unknown as { rowCount?: number }).rowCount ?? 0;
     if (deleted > 0) {
       process.stdout.write(
-        `[CLEANUP] ✅ Surgically purged ${deleted} familypornhd.com rows with empty performers/tags — will be re-scraped with clean metadata.\n`,
+        `[CLEANUP] ✅ Purged ${deleted} stale familypornhd.com rows (empty/generic performers & tags) — historic deep crawl will re-scrape them with clean metadata.\n`,
       );
-      logger.info({ deleted }, "purgeFamilyPornHDRows: stale rows (empty performers/tags) deleted for re-scrape");
+      logger.info({ deleted }, "purgeFamilyPornHDRows: stale rows purged — empty or generic-tags-only");
     } else {
-      process.stdout.write(`[CLEANUP] No familypornhd.com rows with empty performers/tags found — DB is already clean.\n`);
+      process.stdout.write(`[CLEANUP] No stale familypornhd.com rows found — DB is already clean.\n`);
     }
   } catch (err) {
     // Re-throw so the startup chain breaks and the FamilyPornHD backfill does
@@ -462,7 +472,7 @@ app.listen(port, (err?: Error) => {
               `   Studios: 28 whitelisted · 5 pages each\n` +
               `   Keywords: ${EMPTY_CATEGORY_KEYWORDS.length} terms · 5 pages each\n` +
               `   Performers: 33 stars · UNLIMITED pages\n` +
-              `   FamilyPornHD: 3 listing pages\n` +
+              `   FamilyPornHD: DEEP CRAWL up to 100 pages (stops when archive is exhausted)\n` +
               `   isScraping=true — heartbeat armed, container kept alive\n\n`,
             );
 
@@ -472,7 +482,7 @@ app.listen(port, (err?: Error) => {
               scrapeByStudios(5),
               scrapeByKeywords(EMPTY_CATEGORY_KEYWORDS, 5),
               scrapeByPerformers(),
-              scrapeFamilyPornHD(3),
+              scrapeFamilyPornHD(100, true), // deep crawl: up to 100 pages, stop when archive exhausted
             ])
               .then(() => seedWhitelistedPerformers())
               .then(() => {
