@@ -1,0 +1,1 @@
+- [PervFlix setup](pervflix-setup.md) — artifact registration gotcha: backup must come from zip, not from post-createArtifact scaffold; Vite proxy needed for /api.
