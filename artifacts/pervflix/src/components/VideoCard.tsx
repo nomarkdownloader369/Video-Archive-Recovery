@@ -24,7 +24,7 @@ function resolveQualityLabel(video: Video): "4K" | "1080P" {
  * Accepts: "22:53", "1:22:53", "22m 30s", "22m30s", "1h 22m".
  */
 function formatFullDuration(dur: string): string {
-  if (!dur) return "FULL";
+  if (!dur || dur === "0:00") return "FULL VIDEO";
   const s = dur.trim();
 
   // HH:MM:SS

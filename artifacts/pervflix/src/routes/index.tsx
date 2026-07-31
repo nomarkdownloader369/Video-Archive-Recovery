@@ -141,9 +141,11 @@ function HeroSlider() {
             {slide.title}
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
-            <span>{slide.year}</span><span>•</span>
-            <span>{slide.duration}</span><span>•</span>
-            <span>{slide.views} views</span>
+            {[
+              slide.year,
+              slide.duration && slide.duration !== "0:00" ? slide.duration : null,
+              slide.views ? `${slide.views} views` : null,
+            ].filter(Boolean).join(" • ")}
           </div>
           {slide.description && (
             <p className="mt-1.5 line-clamp-2 text-[10px] leading-snug text-foreground/75">
@@ -189,11 +191,14 @@ function HeroMeta({ slide }: { slide: Video }) {
 }
 
 function HeroStats({ slide }: { slide: Video }) {
+  const metaItems = [
+    slide.year,
+    slide.duration && slide.duration !== "0:00" ? slide.duration : null,
+    slide.views ? `${slide.views} views` : null,
+  ].filter(Boolean);
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:mt-4 sm:text-sm">
-      <span>{slide.year}</span><span>•</span>
-      <span>{slide.duration}</span><span>•</span>
-      <span>{slide.views} views</span>
+      {metaItems.join(" • ")}
     </div>
   );
 }

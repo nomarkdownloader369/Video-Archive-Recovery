@@ -187,7 +187,15 @@ function WatchPage() {
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M8 5v14l11-7z" />
                     </svg>
-                    Play Full Film · {video.duration}
+                    {(() => {
+                      const dur =
+                        video.duration && video.duration !== "0:00"
+                          ? video.duration
+                          : video.duration_seconds > 0
+                            ? formatDuration(video.duration_seconds)
+                            : null;
+                      return dur ? `Play Full Film • ${dur}` : "Play Full Film";
+                    })()}
                   </button>
                 </div>
               </>
@@ -222,9 +230,9 @@ function WatchPage() {
                       : video.duration_seconds > 0
                         ? formatDuration(video.duration_seconds)
                         : null;
-                  return [video.year, dur, `${video.views} views`]
+                  return [video.year, dur, video.views ? `${video.views} views` : null]
                     .filter(Boolean)
-                    .join(" · ");
+                    .join(" • ");
                 })()}
               </span>
             </div>
