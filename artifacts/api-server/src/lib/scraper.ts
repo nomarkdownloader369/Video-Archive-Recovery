@@ -1385,13 +1385,17 @@ export async function scrapeByPerformers(): Promise<void> {
         // Special case — "Dredd xxx": source sites list him as plain "Dredd",
         // so we accept any of "dredd", "dredd xxx", or "dreddxxx" as a match
         // so his full archive gets indexed and linked under "Dredd xxx".
-        const performerLower = performer.name.toLowerCase();
+        // Strict exact-word match: trim + lowercase-equal on both sides.
+        // This prevents partial-substring false positives (e.g. "James" matching
+        // "Andi James", or "Raine" matching "Wendy Raine") from ever landing in
+        // the DB via the performer crawl.
+        const performerLower = performer.name.trim().toLowerCase();
         const isDredd = performerLower === "dredd xxx";
         const withEmbed = enriched.filter(
           (v) =>
             isRealEmbedUrl(v.embed_url) &&
             v.pornstars.some((p) => {
-              const pl = p.toLowerCase();
+              const pl = p.trim().toLowerCase();
               if (isDredd) return pl === "dredd" || pl === "dredd xxx" || pl === "dreddxxx";
               return pl === performerLower;
             }),

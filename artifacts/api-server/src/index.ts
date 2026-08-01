@@ -181,6 +181,80 @@ async function autoPerformerRepair(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// autoPerformerCleanup — surgical removal of partial/substring performer names
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps each canonical full-name to the partial/single-word aliases it subsumes.
+ * When a video row contains BOTH the canonical name AND a partial alias, the
+ * alias was falsely injected (substring match) and must be removed.
+ */
+const PERFORMER_COLLISION_RULES: Array<{ canonical: string; partials: string[] }> = [
+  { canonical: "Sarah Vandella", partials: ["Sarah", "Ella"] },
+  { canonical: "Andi James",     partials: ["James"] },
+  { canonical: "Wendy Raine",    partials: ["Raine"] },
+  { canonical: "Rachel Steele",  partials: ["Steele"] },
+];
+
+async function autoPerformerCleanup(): Promise<void> {
+  const start = Date.now();
+
+  // Fetch all published videos — only need id + pornstars
+  const videos = await db
+    .select({ id: videosTable.id, pornstars: videosTable.pornstars })
+    .from(videosTable)
+    .where(eq(videosTable.status, "published"));
+
+  let purgeCount = 0;
+  const updates: Array<{ id: number; pornstars: string[] }> = [];
+
+  for (const video of videos) {
+    if (!video.pornstars || video.pornstars.length < 2) continue;
+
+    // Build a lowercase set for O(1) collision look-up
+    const nameSet = new Set(video.pornstars.map((p: string) => p.trim().toLowerCase()));
+    const toRemove = new Set<string>();
+
+    for (const rule of PERFORMER_COLLISION_RULES) {
+      // Only act when the canonical full name is actually in this row
+      if (!nameSet.has(rule.canonical.trim().toLowerCase())) continue;
+      for (const partial of rule.partials) {
+        if (nameSet.has(partial.trim().toLowerCase())) {
+          toRemove.add(partial.trim().toLowerCase());
+        }
+      }
+    }
+
+    if (toRemove.size === 0) continue;
+
+    const cleaned = video.pornstars.filter(
+      (p: string) => !toRemove.has(p.trim().toLowerCase()),
+    );
+    purgeCount += video.pornstars.length - cleaned.length;
+    updates.push({ id: video.id, pornstars: cleaned });
+  }
+
+  // Write updates in batches of 50 concurrent DB calls
+  const CONCURRENCY = 50;
+  for (let i = 0; i < updates.length; i += CONCURRENCY) {
+    await Promise.all(
+      updates.slice(i, i + CONCURRENCY).map(({ id, pornstars }) =>
+        db.update(videosTable).set({ pornstars }).where(eq(videosTable.id, id)),
+      ),
+    );
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  process.stdout.write(
+    `\n🛠️ [CLEANUP] Surgically purged ${purgeCount} duplicate partial performer names from the DB in ${elapsed} seconds!\n\n`,
+  );
+  logger.info(
+    { purgeCount, videosScanned: videos.length, rowsUpdated: updates.length, elapsedSeconds: elapsed },
+    "autoPerformerCleanup: complete",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Backup / Restore
 // ---------------------------------------------------------------------------
 
@@ -511,6 +585,9 @@ app.listen(port, (err?: Error) => {
         );
         autoPerformerRepair().catch((err: unknown) =>
           logger.error({ err }, "autoPerformerRepair failed"),
+        );
+        autoPerformerCleanup().catch((err: unknown) =>
+          logger.error({ err }, "autoPerformerCleanup failed"),
         );
 
         // Restore → purge stale rows → arm backup interval → then start backfill.
