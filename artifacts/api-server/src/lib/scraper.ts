@@ -1549,7 +1549,7 @@ function extractGalaxyPornMeta(html: string): {
   const performers: string[] = [];
   const perfSeen = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $("a[href*='/pornstar/'], a[href*='/model/'], a[href*='/actress/']").each((_: number, el: any) => {
+  $("a[href*='/pornstar/'], a[href*='/model/'], a[href*='/models/'], a[href*='/actress/']").each((_: number, el: any) => {
     const name = $(el).text().trim();
     if (name && name.length > 1 && !perfSeen.has(name)) {
       perfSeen.add(name);
