@@ -11,7 +11,7 @@ import {
   scrapeByKeywords,
   scrapeByPerformers,
   seedWhitelistedPerformers,
-  scrapeFamilyPornHD,
+  scrapeGalaxyPorn,
 } from "./lib/scraper";
 
 // 7 empty/low-video categories seeded immediately on boot via targeted keyword search.
@@ -191,54 +191,32 @@ async function restoreFromBackupIfNeeded(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// purgeFamilyPornHDRows — drop all rows sourced from familypornhd.com so they
-// can be re-scraped immediately with the corrected, sidebar-free tag extractor.
-// Matches on both the embed_url domain and the "fphd-" slug prefix so that
-// rows restored from backup.json with stale generic tags are also removed.
+// purgeAllFamilyPornHD — hard-delete every row sourced from familypornhd.com.
+// Matches on embed_url domain and the "fphd-" slug prefix so rows restored
+// from backup.json are also removed. galaxyporn.net replaces this source.
 // ---------------------------------------------------------------------------
 
-async function purgeFamilyPornHDRows(): Promise<void> {
+async function purgeAllFamilyPornHD(): Promise<void> {
   try {
-    // Surgical delete — remove all fphd rows that carry stale/redundant metadata
-    // from previous scrape runs so the updated parser can re-scrape them cleanly.
-    //
-    // Conditions (any one is sufficient):
-    //   1. No performers recorded (pornstars is empty)
-    //   2. No tags recorded (tags is empty)
-    //   3. Tags contain only the generic defaults injected by the old scraper
-    //      (e.g. ['taboo'], ['family'], ['taboo','family'] — no scene-specific tags)
-    //
-    // Rows that already have clean performers + specific tags are left untouched.
     const result = await db.execute(
       sql`DELETE FROM pf_videos
-          WHERE (
-            embed_url ILIKE ${"%" + "familypornhd.com" + "%"}
-            OR slug LIKE ${"fphd-%"}
-          )
-          AND (
-            cardinality(pornstars) = 0
-            OR cardinality(tags)   = 0
-            OR tags <@ ARRAY['taboo','family','step-family','step','incest']::text[]
-          )`,
+          WHERE embed_url ILIKE ${'%familypornhd.com%'}
+             OR slug LIKE ${'fphd-%'}`,
     );
     const deleted = (result as unknown as { rowCount?: number }).rowCount ?? 0;
     if (deleted > 0) {
       process.stdout.write(
-        `[CLEANUP] ✅ Purged ${deleted} stale familypornhd.com rows (empty/generic performers & tags) — historic deep crawl will re-scrape them with clean metadata.\n`,
+        `[CLEANUP] ✅ Purged ${deleted} familypornhd.com rows — source retired, galaxyporn.net will backfill.\n`,
       );
-      logger.info({ deleted }, "purgeFamilyPornHDRows: stale rows purged — empty or generic-tags-only");
+      logger.info({ deleted }, 'purgeAllFamilyPornHD: all fphd rows deleted');
     } else {
-      process.stdout.write(`[CLEANUP] No stale familypornhd.com rows found — DB is already clean.\n`);
+      process.stdout.write('[CLEANUP] No familypornhd.com rows found — DB is already clean.\n');
     }
   } catch (err) {
-    // Re-throw so the startup chain breaks and the FamilyPornHD backfill does
-    // NOT start — starting it while stale rows remain would leave them in place
-    // because slug deduplication silently skips re-inserts.
     process.stdout.write(
-      `[CLEANUP] ⚠️  familypornhd.com purge failed — FamilyPornHD backfill will NOT start to prevent stale-row contamination: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[CLEANUP] ⚠️  familypornhd.com purge failed: ${err instanceof Error ? err.message : String(err)}\n`,
     );
-    logger.error({ err }, "purgeFamilyPornHDRows: delete failed — re-throwing to abort backfill");
-    throw err;
+    logger.error({ err }, 'purgeAllFamilyPornHD: delete failed');
   }
 }
 
@@ -459,20 +437,20 @@ app.listen(port, (err?: Error) => {
 
         // Restore → purge stale rows → arm backup interval → then start backfill.
         // The backfill is chained INSIDE the restore/purge promise so that
-        // purgeFamilyPornHDRows() is guaranteed to finish before any scraper
+        // purgeAllFamilyPornHD() is guaranteed to finish before any scraper
         // begins inserting new rows (eliminates the delete-vs-insert race).
         restoreFromBackupIfNeeded()
           .then(() => purgeFullHDPorn())
-          .then(() => purgeFamilyPornHDRows())
+          .then(() => purgeAllFamilyPornHD())
           .then(() => {
             startBackupInterval();
 
             process.stdout.write(
-              `\n🚀 BACKFILL: Launching studios · keywords · performers · FamilyPornHD concurrently\n` +
+              `\n🚀 BACKFILL: Launching studios · keywords · performers · GalaxyPorn concurrently\n` +
               `   Studios: 28 whitelisted · 5 pages each\n` +
               `   Keywords: ${EMPTY_CATEGORY_KEYWORDS.length} terms · 5 pages each\n` +
               `   Performers: 33 stars · UNLIMITED pages\n` +
-              `   FamilyPornHD: DEEP CRAWL up to 100 pages (stops when archive is exhausted)\n` +
+              `   GalaxyPorn: Taboo + Missax · 3 pages each\n` +
               `   isScraping=true — heartbeat armed, container kept alive\n\n`,
             );
 
@@ -482,7 +460,7 @@ app.listen(port, (err?: Error) => {
               scrapeByStudios(5),
               scrapeByKeywords(EMPTY_CATEGORY_KEYWORDS, 5),
               scrapeByPerformers(),
-              scrapeFamilyPornHD(100, true), // deep crawl: up to 100 pages, stop when archive exhausted
+              scrapeGalaxyPorn(3),
             ])
               .then(() => seedWhitelistedPerformers())
               .then(() => {
@@ -504,10 +482,10 @@ app.listen(port, (err?: Error) => {
         // Autopilot interval is armed immediately after DB check — it runs every
         // 4 hours and does not need to wait for the initial backfill to finish.
         setInterval(() => {
-          logger.info("Autopilot: triggering scheduled scrapeLatest + FamilyPornHD");
+          logger.info("Autopilot: triggering scheduled scrapeLatest + GalaxyPorn");
           Promise.all([
             scrapeLatest(3),
-            scrapeFamilyPornHD(3),
+            scrapeGalaxyPorn(3),
           ])
             .then(() => seedWhitelistedPerformers())
             .catch((err: unknown) => logger.error({ err }, "Autopilot multi-source scrape failed"));
@@ -515,7 +493,7 @@ app.listen(port, (err?: Error) => {
 
         logger.info(
           { intervalHours: AUTOPILOT_INTERVAL_MS / 3_600_000 },
-          "Autopilot Scheduler armed — HQporner + FamilyPornHD will fire every 4 hours",
+          "Autopilot Scheduler armed — HQporner + GalaxyPorn will fire every 4 hours",
         );
       })
       .catch((err: unknown) => {

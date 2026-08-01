@@ -1468,30 +1468,23 @@ export async function scrapeByPerformers(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// scrapeFamilyPornHD — listing + detail pages from familypornhd.com
+// scrapeGalaxyPorn — listing + detail pages from galaxyporn.net (MissaX / Taboo 4K)
 // ---------------------------------------------------------------------------
 
-const FPHD_BASE     = "https://familypornhd.com";
-const FPHD_DELAY_MS = 600;
+const GP_BASE     = "https://galaxyporn.net";
+const GP_DELAY_MS = 600;
+const GP_SEARCHES = ["Taboo", "Missax"];
 
 /**
- * Extract metadata from a familypornhd.com detail page.
+ * Extract the embed iframe src and metadata from a galaxyporn.net detail page.
  *
  * Embed URL resolution priority:
- *   1. <iframe src> that contains "/embed" or points to a known third-party
- *      player domain (e.g. streamtape, doodstream, xvideos, etc.) — the
- *      dedicated open embed player; renders without X-Frame-Options issues.
- *   2. Any other external <iframe src> NOT on the familypornhd.com domain.
- *   3. <meta property="og:video"> / <meta property="og:video:url"> — only
- *      accepted when the URL does NOT point back to the bare familypornhd.com page.
- *
- * Any URL that still points to familypornhd.com (non-embed) is treated as null.
- *
- * Tag extraction is restricted to the video's own metadata block.
- * Sidebar tag clouds, footer widget clouds, and channel/studio directory
- * links are explicitly excluded.
+ *   1. <iframe src> that is an external third-party player (not galaxyporn.net)
+ *      or an explicit /embed/ path on galaxyporn.net itself.
+ *   2. <meta property="og:video"> / <meta property="og:video:url"> — only
+ *      accepted when the URL does NOT point back to the galaxyporn.net page.
  */
-function extractFamilyPornHDMeta(html: string): {
+function extractGalaxyPornMeta(html: string): {
   embedUrl: string | null;
   durationSeconds: number;
   tags: string[];
@@ -1499,212 +1492,64 @@ function extractFamilyPornHDMeta(html: string): {
 } {
   const $ = cheerio.load(html);
 
-  // Primary + fallback iframe pass
-  let preferredEmbed = "";
-  let fallbackEmbed  = "";
-
+  // Embed URL — first <iframe src> that is an external player
+  let embedUrl: string | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   $("iframe[src]").each((_: number, el: any) => {
-    if (preferredEmbed) { return false as unknown as void; }
+    if (embedUrl) return false as unknown as void;
     const s = $(el).attr("src") ?? "";
     if (!s) return;
     const abs = s.startsWith("//") ? `https:${s}` : s;
     if (!abs.startsWith("http")) return;
-
-    // Dedicated embed path on familypornhd.com itself
-    if (abs.includes("familypornhd.com/embed")) {
-      preferredEmbed = abs;
-      return false as unknown as void;
-    }
-    // Any external player (streamtape, doodstream, xvideos embed, etc.)
-    if (!abs.includes("familypornhd.com") && !fallbackEmbed) {
-      fallbackEmbed = abs;
-    }
+    // Accept galaxyporn.net only if it's an /embed/ path
+    if (abs.includes("galaxyporn.net") && !abs.includes("/embed")) return;
+    embedUrl = abs;
   });
 
-  // OG meta fallback — reject bare familypornhd.com page URLs
-  let metaEmbed: string | null = null;
-  const ogVideo =
-    $("meta[property='og:video']").attr("content") ??
-    $("meta[property='og:video:url']").attr("content") ??
-    null;
-  if (ogVideo && !ogVideo.match(/^https?:\/\/familypornhd\.com\/(?!embed)/)) {
-    metaEmbed = ogVideo;
+  // OG video fallback — reject bare galaxyporn.net page URLs
+  if (!embedUrl) {
+    const og =
+      $("meta[property='og:video']").attr("content") ??
+      $("meta[property='og:video:url']").attr("content") ??
+      null;
+    if (og && !og.match(/^https?:\/\/galaxyporn\.net\/(?!embed)/)) {
+      embedUrl = og;
+    }
   }
 
-  const resolved = preferredEmbed || fallbackEmbed || metaEmbed || null;
-  // Final safety-net: never store a bare familypornhd.com page URL as embed
-  const embedUrl =
-    resolved &&
-    resolved.includes("familypornhd.com") &&
-    !resolved.includes("/embed")
-      ? null
-      : resolved;
-
-  // Duration — try OG/video meta first, then visible text elements
+  // Duration — OG/video meta first, then visible text
   const durationRaw =
     $("meta[property='video:duration']").attr("content") ??
     $("meta[name='duration']").attr("content") ??
     "";
   let durationSeconds = parseInt(durationRaw, 10) || 0;
   if (!durationSeconds) {
-    const durText = $(
-      ".duration, .video-duration, span.time, .video-time, [class*='duration'], .runtime",
-    )
-      .first()
-      .text()
-      .trim();
+    const durText = $(".duration, .video-duration, span.time, .video-time, [class*='duration'], .runtime")
+      .first().text().trim();
     if (durText) durationSeconds = parseDurationText(durText);
   }
 
-  // ---------------------------------------------------------------------------
-  // Tag / category extraction — STRICT: verified per-video container only.
-  //
-  // Rules enforced here:
-  //   1. Positive container anchor — only the first matching element from
-  //      VIDEO_META_CONTAINER_SELECTORS is searched.  If no selector matches,
-  //      we return [] rather than falling back to the whole document; a
-  //      whole-document scan would ingest sidebar/footer tag clouds whenever
-  //      the site's markup changes.
-  //   2. Excluded-container guard — always active, even inside a positive root,
-  //      because broad containers (article, .post-content) may wrap related-
-  //      video sections or inline sidebar widgets on some tube-site themes.
-  //   3. href guard — performer, model, studio, and channel links that happen
-  //      to share a /tag/ or /category/ path pattern are excluded by href.
-  //   4. GENERIC_TAG_BLOCKLIST — low-signal words filtered by exact match.
-  //   5. STUDIO_WHITELIST guard — studio brand names ("pervmom", "mylf" …)
-  //      are excluded; they appear as anchor text in channel-directory lists
-  //      that can sit inside broad positive roots.
-  //   6. Length guard — tags shorter than 2 chars or longer than 40 dropped.
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Priority list of positive selectors for the per-video metadata block.
-   * More-specific selectors come first to keep the scope as tight as possible.
-   * Broad containers (article, .post-content) are included last so excluded-
-   * container filtering catches subsections within them.
-   * The first match wins; if nothing matches, tag extraction is skipped.
-   */
-  const VIDEO_META_CONTAINER_SELECTORS = [
-    ".video-metadata",
-    ".video-info",
-    ".video-details",
-    ".video-meta",
-    ".post-meta",
-    ".entry-meta",
-    ".post-tags",
-    ".entry-tags",
-    ".tags-wrapper",
-    ".video-tags",
-    "article.post",
-    "article",
-    ".entry-content",
-    ".post-content",
-    ".main-content",
-    "#content",
-  ];
-
-  /** Ancestors that must NOT contain any tag link we accept. */
-  const EXCLUDED_CONTAINER_SEL =
-    "aside, .sidebar, footer, .footer, " +
-    ".widget, .widget-area, .widget-container, " +
-    ".tag-cloud, .wp-tag-cloud, .tagcloud, " +
-    ".best-channels, .channel-list, .studio-list, " +
-    ".related-videos, .related, .recommended, " +
-    "nav, .navigation, .nav, header";
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function isInExcludedContainer(el: any): boolean {
-    return $(el).parents(EXCLUDED_CONTAINER_SEL).length > 0;
-  }
-
-  /** Generic words that appear as tag/category link text sitewide — not useful. */
-  const GENERIC_TAG_BLOCKLIST = new Set([
-    "categories", "category", "videos", "video", "tags", "tag", "all",
-    "hd", "full", "porn", "sex", "free", "watch", "more", "latest",
-    "popular", "top", "best", "new", "trending", "hot", "content",
-    "site", "home", "search", "browse", "gallery", "movies", "clips",
-  ]);
-
-  /**
-   * Validate a candidate tag text.
-   * Rejects: empty / too short / too long / generic sitewide words /
-   * whitelisted studio names (appear as "best channel" link text even
-   * inside article containers on some tube-site themes).
-   */
-  function isUsableTag(raw: string): boolean {
-    const t = raw.trim().toLowerCase();
-    if (!t || t.length < 2 || t.length > 40) return false;
-    if (GENERIC_TAG_BLOCKLIST.has(t)) return false;
-    if (STUDIO_WHITELIST.has(t)) return false; // e.g. "pervmom", "mylf"
-    return true;
-  }
-
-  // Find the tightest verified container for this page's video metadata.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let $metaRoot: any = null;
-  for (const sel of VIDEO_META_CONTAINER_SELECTORS) {
-    const $el = $(sel).first();
-    if ($el.length) { $metaRoot = $el; break; }
-  }
-
+  // Tags — category and tag anchor links from the page
   const tags: string[] = [];
-  const tagSeen        = new Set<string>();
-
-  // ---------------------------------------------------------------------------
-  // Tag extraction — three targeted passes, most-specific selector first.
-  // All passes are scoped to $metaRoot when a verified container was found.
-  // No whole-document fallback: if no container matches, tags returns [].
-  // Excluded-container guard is always on even inside a positive root because
-  // broad containers (article, #content) may wrap related/sidebar subsections.
-  // ---------------------------------------------------------------------------
-
+  const tagSeen = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function collectTags($scope: any, selector: string): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    $scope.find(selector).each((_: number, el: any) => {
-      if (isInExcludedContainer(el)) return;
-      const href = $(el).attr("href") ?? "";
-      // Skip any link whose href resolves to a performer/studio/channel page
-      if (
-        href.includes("/pornstar/") || href.includes("/model/") ||
-        href.includes("/models/")   || href.includes("/actress/") ||
-        href.includes("/studio/")   || href.includes("/channel/")
-      ) return;
-      const t = $(el).text().trim().toLowerCase();
-      if (!isUsableTag(t)) return;
-      if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
-    });
-  }
+  $("a[href*='/category/'], a[href*='/tag/']").each((_: number, el: any) => {
+    const href = $(el).attr("href") ?? "";
+    // Skip performer/studio links that share category/tag paths
+    if (
+      href.includes("/pornstar/") || href.includes("/model/") ||
+      href.includes("/actress/")  || href.includes("/studio/")
+    ) return;
+    const t = $(el).text().trim().toLowerCase();
+    if (!t || t.length < 2 || t.length > 40) return;
+    if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
+  });
 
-  if ($metaRoot) {
-    // Pass 1 — tightest: only anchors explicitly linking to a /tag/ path
-    //   inside a .video-metadata-item wrapper (WordPress custom field pattern).
-    collectTags($metaRoot, ".video-metadata-item a[href*='/tag/']");
-
-    // Pass 2 — common tube-site class for the video's own tag list.
-    if (tags.length === 0) collectTags($metaRoot, ".video-tags a");
-
-    // Pass 3 — alternate common class used by many WordPress tube themes.
-    if (tags.length === 0) collectTags($metaRoot, ".tag-list a, .tags-list a");
-  }
-
-  // ---------------------------------------------------------------------------
-  // Performer extraction — whole-page a[href*="/pornstar/"] scan.
-  //
-  // "/pornstar/" hrefs are semantically specific (they point to a performer
-  // profile page) and are unlikely to appear as sidebar navigation noise.
-  // Scanning the full document rather than just $metaRoot ensures we catch
-  // performer links that some themes place outside the main article container.
-  // The excluded-container guard is still applied for belt-and-suspenders safety.
-  // ---------------------------------------------------------------------------
-
+  // Performers — model/pornstar profile links
   const performers: string[] = [];
-  const perfSeen             = new Set<string>();
-
+  const perfSeen = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $("a[href*='/pornstar/']").each((_: number, el: any) => {
-    if (isInExcludedContainer(el)) return;
+  $("a[href*='/pornstar/'], a[href*='/model/'], a[href*='/actress/']").each((_: number, el: any) => {
     const name = $(el).text().trim();
     if (name && name.length > 1 && !perfSeen.has(name)) {
       perfSeen.add(name);
@@ -1716,233 +1561,227 @@ function extractFamilyPornHDMeta(html: string): {
 }
 
 /**
- * Scrape familypornhd.com listing pages and upsert new taboo/family videos.
+ * Scrape galaxyporn.net for Taboo and MissaX 4K content.
  *
- * - Applies TABOO_KEYWORDS filter on titles — same gate as other sources.
- * - Embed URL comes from the detail-page <iframe src="..."> (third-party player
- *   or familypornhd.com/embed/...).
- * - Slugs prefixed "fphd-" to prevent collisions with HQporner slugs.
- * - Uses onConflictDoUpdate (embed_url target) so view counts are refreshed on
- *   repeat runs instead of silently discarding the update.
+ * Searches both "Taboo" and "Missax" query terms, crawling up to `pagesCount`
+ * WordPress paged listing pages per search. Detail pages are fetched to
+ * extract the real <iframe src> embed URL, duration, tags, and performers.
+ * Uses onConflictDoUpdate so repeat runs refresh view counts rather than
+ * silently discarding updates.
  *
- * @param pagesCount Listing pages to crawl (default 3).
+ * @param pagesCount Listing pages to crawl per search term (default 3).
  */
-export async function scrapeFamilyPornHD(pagesCount = 3, breakOnEmpty = false): Promise<void> {
-  logger.info({ pagesCount, breakOnEmpty }, "scrapeFamilyPornHD: starting");
-  process.stdout.write(`\n[FAMILYPORNHD] Starting scrape — up to ${pagesCount} listing pages${breakOnEmpty ? " (stop on first empty page)" : ""}\n`);
+export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
+  logger.info({ pagesCount, searches: GP_SEARCHES }, "scrapeGalaxyPorn: starting");
+  process.stdout.write(
+    `\n[GALAXYPORN] Starting scrape — up to ${pagesCount} pages × ${GP_SEARCHES.length} search terms\n`,
+  );
 
   const seenSlugs = new Set<string>();
   let totalSaved  = 0;
 
-  for (let page = 1; page <= pagesCount; page++) {
-    // familypornhd.com uses WordPress standard /page/N/ pagination (NOT /?page=N which 301s to homepage)
-    const listUrl = page === 1 ? `${FPHD_BASE}/` : `${FPHD_BASE}/page/${page}/`;
-    const html    = await fetchHtmlFrom(listUrl, FPHD_BASE);
-    if (!html) {
-      process.stdout.write(`[FAMILYPORNHD] Page ${page} — fetch failed, skipping\n`);
-      await delay(FPHD_DELAY_MS);
-      continue;
-    }
+  for (const query of GP_SEARCHES) {
+    process.stdout.write(`[GALAXYPORN] ── Search: "${query}"\n`);
 
-    const $          = cheerio.load(html);
-    const candidates: ScrapedVideo[] = [];
+    for (let page = 1; page <= pagesCount; page++) {
+      // WordPress paged search: page 1 = /?s=query, page N = /page/N/?s=query
+      const listUrl = page === 1
+        ? `${GP_BASE}/?s=${encodeURIComponent(query)}`
+        : `${GP_BASE}/page/${page}/?s=${encodeURIComponent(query)}`;
 
-    // Collect video links + metadata from the listing page.
-    // We try progressively broader selectors so the scraper degrades gracefully
-    // if the site updates its markup.
-    const videoLinks: { href: string; title: string; thumb: string; durText: string }[] = [];
-    const linkSeen = new Set<string>();
-
-    // Tier 1 — known tube-site card patterns
-    const CARD_SELECTORS = [
-      ".video-item",
-      ".thumb-item",
-      ".video-block",
-      "article.video",
-      ".videos-list .item",
-      ".grid-item",
-      "div[class*='video-card']",
-      "div[class*='thumb']",
-      ".item",
-    ];
-
-    for (const cardSel of CARD_SELECTORS) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      $(cardSel).each((_: number, el: any) => {
-        const card   = $(el);
-        const linkEl = card.find("a[href]").first();
-        const href   = linkEl.attr("href") ?? "";
-        if (!href) return;
-        // Must link to a video detail page on the same domain
-        const abs = href.startsWith("http") ? href : `${FPHD_BASE}${href}`;
-        if (!abs.includes("familypornhd.com")) return;
-        if (linkSeen.has(abs)) return;
-
-        const imgEl  = card.find("img").first();
-        let thumb    = imgEl.attr("data-src") ?? imgEl.attr("data-original") ?? imgEl.attr("src") ?? "";
-        if (thumb.startsWith("/"))  thumb = `${FPHD_BASE}${thumb}`;
-        if (thumb.startsWith("//")) thumb = `https:${thumb}`;
-        if (!thumb.startsWith("http")) return;
-
-        const title =
-          card.find(".title, .video-title, h3, h2").first().text().trim() ||
-          imgEl.attr("alt")?.trim() ||
-          linkEl.attr("title")?.trim() ||
-          "";
-        if (!title) return;
-
-        const durText = card.find(".duration, .time, [class*='dur'], .runtime").first().text().trim();
-
-        linkSeen.add(abs);
-        videoLinks.push({ href: abs, title, thumb, durText });
-      });
-      if (videoLinks.length > 0) break;
-    }
-
-    // Tier 2 — broad fallback: any anchor on familypornhd.com that wraps an img
-    if (videoLinks.length === 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      $("a[href]").each((_: number, el: any) => {
-        const a    = $(el);
-        const href = a.attr("href") ?? "";
-        if (!href) return;
-        const abs = href.startsWith("http") ? href : `${FPHD_BASE}${href}`;
-        if (!abs.includes("familypornhd.com")) return;
-        if (abs === FPHD_BASE || abs === `${FPHD_BASE}/`) return;
-        if (linkSeen.has(abs)) return;
-
-        const imgEl  = a.find("img").first();
-        if (!imgEl.length) return;
-        let thumb    = imgEl.attr("data-src") ?? imgEl.attr("src") ?? "";
-        if (thumb.startsWith("/"))  thumb = `${FPHD_BASE}${thumb}`;
-        if (thumb.startsWith("//")) thumb = `https:${thumb}`;
-        if (!thumb.startsWith("http")) return;
-
-        const title =
-          imgEl.attr("alt")?.trim() || a.attr("title")?.trim() || "";
-        if (!title) return;
-        linkSeen.add(abs);
-        videoLinks.push({ href: abs, title, thumb, durText: "" });
-      });
-    }
-
-    // familypornhd.com is a pure family/taboo niche site — every video is on-topic.
-    // TABOO_KEYWORDS filter is intentionally bypassed: the source domain is the relevance gate.
-    // MIN_DURATION_SECONDS is also relaxed (accept 0 = unknown duration from listing page).
-    for (const { href, title, thumb, durText } of videoLinks) {
-      const durationSeconds = parseDurationText(durText);
-      if (durationSeconds > 0 && durationSeconds < MIN_DURATION_SECONDS) continue;
-
-      // Build a stable slug from the URL path
-      const pathSlug = href
-        .replace(/^https?:\/\/[^/]+/, "")
-        .replace(/^\//, "")
-        .replace(/\/$/, "");
-      const rawSlug  = `fphd-${slugify(pathSlug || title)}`.slice(0, 120);
-      if (seenSlugs.has(rawSlug)) continue;
-      seenSlugs.add(rawSlug);
-
-      const familyKeyword = detectFamilyKeyword(title, []);
-
-      candidates.push({
-        slug:             rawSlug,
-        title,
-        description:      null,
-        source_url:       href,
-        embed_url:        href,   // overwritten from detail-page iframe below
-        thumbnail_url:    thumb,
-        duration_seconds: durationSeconds,
-        duration_text:    durText,
-        views:            simulateViews(0),
-        likes:            0,
-        quality_label:    "HD",
-        category:         familyKeyword ? "family" : "taboo",
-        studio:           null,
-        release_year:     simulateReleaseYear(),
-        tags:             familyKeyword ? [familyKeyword, "taboo"] : ["taboo"],
-        pornstars:        [],
-        status:           "published",
-        _familyKeyword:   familyKeyword,
-      });
-    }
-
-    logger.info({ page, candidates: candidates.length }, "scrapeFamilyPornHD: listing page parsed");
-
-    if (candidates.length === 0) {
-      process.stdout.write(`[FAMILYPORNHD] Page ${page} — 0 candidates after taboo filter\n`);
-      if (breakOnEmpty) {
-        process.stdout.write(`[FAMILYPORNHD] breakOnEmpty=true — stopping deep crawl at page ${page} (end of archive reached)\n`);
-        break;
-      }
-      await delay(FPHD_DELAY_MS);
-      continue;
-    }
-
-    // Dedup: skip slugs already present in DB
-    let newCandidates = candidates;
-    try {
-      const existingRows = await db
-        .select({ slug: videosTable.slug })
-        .from(videosTable)
-        .where(inArray(videosTable.slug, candidates.map((v) => v.slug)));
-      const existingSlugs = new Set(existingRows.map((r) => r.slug));
-      newCandidates = candidates.filter((v) => !existingSlugs.has(v.slug));
-    } catch (dbErr) {
-      logger.warn({ dbErr }, "scrapeFamilyPornHD: dedup check failed — proceeding with all candidates");
-    }
-
-    let savedThisPage = 0;
-    for (const v of newCandidates) {
-      const detailHtml = await fetchHtmlFrom(v.source_url, FPHD_BASE);
-      if (!detailHtml) { await delay(FPHD_DELAY_MS); continue; }
-
-      const {
-        embedUrl,
-        durationSeconds: detailDur,
-        tags:            detailTags,
-        performers,
-      } = extractFamilyPornHDMeta(detailHtml);
-
-      if (!embedUrl) {
-        logger.warn({ slug: v.slug }, "scrapeFamilyPornHD: no external iframe embed URL found — skipping");
-        await delay(200);
+      const html = await fetchHtmlFrom(listUrl, GP_BASE);
+      if (!html) {
+        process.stdout.write(`[GALAXYPORN] "${query}" page ${page} — fetch failed, skipping\n`);
+        await delay(GP_DELAY_MS);
         continue;
       }
 
-      // Merge listing tags with detail-page tags
-      const tagSet = new Set<string>(v.tags);
-      for (const t of detailTags) tagSet.add(t);
+      const $ = cheerio.load(html);
+      const videoLinks: { href: string; title: string; thumb: string; durText: string }[] = [];
+      const linkSeen = new Set<string>();
 
-      const enriched: ScrapedVideo = {
-        ...v,
-        embed_url:        embedUrl,
-        duration_seconds: detailDur > 0 ? detailDur : v.duration_seconds,
-        duration_text:    detailDur > 0
-          ? `${Math.floor(detailDur / 60)}m ${detailDur % 60}s`
-          : v.duration_text,
-        tags:      Array.from(tagSet),
-        pornstars: performers.length > 0 ? performers : v.pornstars,
-        studio:    v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
-      };
+      // Tier 1 — known WordPress tube-site card selectors
+      const CARD_SELECTORS = [
+        "article.post",
+        ".video-item",
+        ".thumb-item",
+        ".video-block",
+        ".grid-item",
+        "div[class*='video-card']",
+        "div[class*='thumb']",
+        ".item",
+      ];
 
-      // onConflictDoUpdate so repeat runs refresh views instead of discarding
-      await upsertBatchWithViewUpdate([enriched]);
-      savedThisPage++;
-      await delay(400);
+      for (const cardSel of CARD_SELECTORS) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        $(cardSel).each((_: number, el: any) => {
+          const card   = $(el);
+          const linkEl = card.find("a[href]").first();
+          const href   = linkEl.attr("href") ?? "";
+          if (!href) return;
+          const abs = href.startsWith("http") ? href : `${GP_BASE}${href}`;
+          if (!abs.includes("galaxyporn.net")) return;
+          if (abs === GP_BASE || abs === `${GP_BASE}/`) return;
+          if (linkSeen.has(abs)) return;
+
+          const imgEl = card.find("img").first();
+          let thumb   = imgEl.attr("data-src") ?? imgEl.attr("data-original") ?? imgEl.attr("src") ?? "";
+          if (thumb.startsWith("/"))  thumb = `${GP_BASE}${thumb}`;
+          if (thumb.startsWith("//")) thumb = `https:${thumb}`;
+          if (!thumb.startsWith("http")) return;
+
+          const title =
+            card.find(".title, .video-title, h1, h2, h3").first().text().trim() ||
+            imgEl.attr("alt")?.trim() ||
+            linkEl.attr("title")?.trim() ||
+            "";
+          if (!title) return;
+
+          const durText = card.find(".duration, .time, [class*='dur'], .runtime").first().text().trim();
+
+          linkSeen.add(abs);
+          videoLinks.push({ href: abs, title, thumb, durText });
+        });
+        if (videoLinks.length > 0) break;
+      }
+
+      // Tier 2 — broad fallback: any anchor wrapping an img on the same domain
+      if (videoLinks.length === 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        $("a[href]").each((_: number, el: any) => {
+          const a    = $(el);
+          const href = a.attr("href") ?? "";
+          if (!href) return;
+          const abs = href.startsWith("http") ? href : `${GP_BASE}${href}`;
+          if (!abs.includes("galaxyporn.net")) return;
+          if (abs === GP_BASE || abs === `${GP_BASE}/`) return;
+          if (abs.includes("/?s=") || abs.includes("/page/")) return;
+          if (linkSeen.has(abs)) return;
+
+          const imgEl = a.find("img").first();
+          if (!imgEl.length) return;
+          let thumb = imgEl.attr("data-src") ?? imgEl.attr("src") ?? "";
+          if (thumb.startsWith("/"))  thumb = `${GP_BASE}${thumb}`;
+          if (thumb.startsWith("//")) thumb = `https:${thumb}`;
+          if (!thumb.startsWith("http")) return;
+
+          const title = imgEl.attr("alt")?.trim() || a.attr("title")?.trim() || "";
+          if (!title) return;
+          linkSeen.add(abs);
+          videoLinks.push({ href: abs, title, thumb, durText: "" });
+        });
+      }
+
+      if (videoLinks.length === 0) {
+        process.stdout.write(`[GALAXYPORN] "${query}" page ${page} — no candidates found\n`);
+        await delay(GP_DELAY_MS);
+        continue;
+      }
+
+      // Build candidate objects from listing data
+      const candidates: ScrapedVideo[] = [];
+      for (const { href, title, thumb, durText } of videoLinks) {
+        const durationSeconds = parseDurationText(durText);
+        if (durationSeconds > 0 && durationSeconds < MIN_DURATION_SECONDS) continue;
+
+        const pathSlug = href
+          .replace(/^https?:\/\/[^/]+/, "")
+          .replace(/^\//, "")
+          .replace(/\/$/, "");
+        const rawSlug = `gp-${slugify(pathSlug || title)}`.slice(0, 120);
+        if (seenSlugs.has(rawSlug)) continue;
+        seenSlugs.add(rawSlug);
+
+        const familyKeyword = detectFamilyKeyword(title, []);
+
+        candidates.push({
+          slug:             rawSlug,
+          title,
+          description:      null,
+          source_url:       href,
+          embed_url:        href,   // overwritten from detail-page iframe below
+          thumbnail_url:    thumb,
+          duration_seconds: durationSeconds,
+          duration_text:    durText,
+          views:            simulateViews(0),
+          likes:            0,
+          quality_label:    "4K",
+          category:         familyKeyword ? "family" : "taboo",
+          studio:           null,
+          release_year:     simulateReleaseYear(),
+          tags:             familyKeyword ? [familyKeyword, "taboo"] : ["taboo"],
+          pornstars:        [],
+          status:           "published",
+          _familyKeyword:   familyKeyword,
+        });
+      }
+
+      logger.info({ query, page, candidates: candidates.length }, "scrapeGalaxyPorn: listing page parsed");
+
+      // Dedup — skip slugs already in DB
+      let newCandidates = candidates;
+      try {
+        const existingRows = await db
+          .select({ slug: videosTable.slug })
+          .from(videosTable)
+          .where(inArray(videosTable.slug, candidates.map((v) => v.slug)));
+        const existingSlugs = new Set(existingRows.map((r: { slug: string }) => r.slug));
+        newCandidates = candidates.filter((v) => !existingSlugs.has(v.slug));
+      } catch (dbErr) {
+        logger.warn({ dbErr }, "scrapeGalaxyPorn: dedup check failed — proceeding with all candidates");
+      }
+
+      let savedThisPage = 0;
+      for (const v of newCandidates) {
+        const detailHtml = await fetchHtmlFrom(v.source_url, GP_BASE);
+        if (!detailHtml) { await delay(GP_DELAY_MS); continue; }
+
+        const {
+          embedUrl,
+          durationSeconds: detailDur,
+          tags:            detailTags,
+          performers,
+        } = extractGalaxyPornMeta(detailHtml);
+
+        if (!embedUrl) {
+          logger.warn({ slug: v.slug }, "scrapeGalaxyPorn: no iframe embed URL found — skipping");
+          await delay(200);
+          continue;
+        }
+
+        // Merge listing tags with detail-page tags
+        const tagSet = new Set<string>(v.tags);
+        for (const t of detailTags) tagSet.add(t);
+
+        const enriched: ScrapedVideo = {
+          ...v,
+          embed_url:        embedUrl,
+          duration_seconds: detailDur > 0 ? detailDur : v.duration_seconds,
+          duration_text:    detailDur > 0
+            ? `${Math.floor(detailDur / 60)}m ${detailDur % 60}s`
+            : v.duration_text,
+          tags:      Array.from(tagSet),
+          pornstars: performers.length > 0 ? performers : v.pornstars,
+          studio:    v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
+        };
+
+        // onConflictDoUpdate so repeat runs refresh view counts
+        await upsertBatchWithViewUpdate([enriched]);
+        savedThisPage++;
+        await delay(400);
+      }
+
+      totalSaved += savedThisPage;
+      process.stdout.write(
+        `[GALAXYPORN] "${query}" page ${page}/${pagesCount} — +${savedThisPage} saved (${totalSaved} total)\n`,
+      );
+      logger.info({ query, page, savedThisPage, totalSaved }, "scrapeGalaxyPorn: page complete");
+      await delay(GP_DELAY_MS);
     }
-
-    totalSaved += savedThisPage;
-    process.stdout.write(
-      `[FAMILYPORNHD] Page ${page}/${pagesCount} — +${savedThisPage} saved (${totalSaved} total)\n`,
-    );
-    logger.info({ page, savedThisPage, totalSaved }, "scrapeFamilyPornHD: page complete");
-    await delay(FPHD_DELAY_MS);
   }
 
-  process.stdout.write(
-    `\n[FAMILYPORNHD] ✅ Complete — ${totalSaved} videos saved across ${pagesCount} pages\n\n`,
-  );
-  logger.info({ totalSaved, pagesCount }, "scrapeFamilyPornHD: complete");
+  process.stdout.write(`\n[GALAXYPORN] ✅ Complete — ${totalSaved} videos saved\n\n`);
+  logger.info({ totalSaved }, "scrapeGalaxyPorn: complete");
 }
 
 // ---------------------------------------------------------------------------
