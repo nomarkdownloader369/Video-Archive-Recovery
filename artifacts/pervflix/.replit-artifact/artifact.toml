@@ -1,6 +1,7 @@
 kind = "web"
 previewPath = "/"
 title = "PervFlix"
+description = "A cinematic adult video streaming platform that aggregates 25,000+ studio-quality videos from curated sources, served through a custom dark-themed React interface with search, categories, performer pages, and a personal watchlist."
 version = "1.0.0"
 id = "artifacts/pervflix"
 router = "path"
