@@ -106,6 +106,81 @@ async function autoTagRepair(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// autoPerformerRepair — title-match performer injection for gp- (GalaxyPorn) rows only
+// ---------------------------------------------------------------------------
+
+async function autoPerformerRepair(): Promise<void> {
+  const start = Date.now();
+
+  // 1. Collect all distinct performer names already present across the whole DB
+  const dbPerformers = await db.execute(sql`
+    SELECT DISTINCT unnest(${videosTable.pornstars}) AS name
+    FROM ${videosTable}
+    WHERE ${videosTable.status} = 'published' AND ${videosTable.pornstars} IS NOT NULL
+  `);
+  const performerList = (dbPerformers.rows as Array<Record<string, unknown>>)
+    .map((r) => r["name"] as string)
+    .filter(Boolean);
+
+  if (performerList.length === 0) return;
+
+  // 2. Fetch ONLY GalaxyPorn-sourced rows — HQporner rows are strictly excluded
+  const gpVideos = await db
+    .select({
+      id:        videosTable.id,
+      title:     videosTable.title,
+      pornstars: videosTable.pornstars,
+    })
+    .from(videosTable)
+    .where(
+      sql`${videosTable.slug} LIKE 'gp-%' OR ${videosTable.embed_url} LIKE '%galaxyporn.net%'`,
+    );
+
+  if (gpVideos.length === 0) return;
+
+  // 3. Scan each gp- title for performer names missing from its pornstars array
+  const updates: Array<{ id: number; pornstars: string[] }> = [];
+
+  for (const video of gpVideos) {
+    const titleLower = video.title.toLowerCase();
+    const existing   = new Set(video.pornstars.map((p) => p.toLowerCase()));
+    const toAdd: string[] = [];
+
+    for (const name of performerList) {
+      if (!name) continue;
+      if (existing.has(name.toLowerCase())) continue;
+      if (titleLower.includes(name.toLowerCase())) {
+        toAdd.push(name);
+      }
+    }
+
+    if (toAdd.length > 0) {
+      const uniquePornstars = [...new Set([...video.pornstars, ...toAdd])];
+      updates.push({ id: video.id, pornstars: uniquePornstars });
+    }
+  }
+
+  // 4. Apply updates (batched, 50 concurrent writes)
+  const CONCURRENCY = 50;
+  for (let i = 0; i < updates.length; i += CONCURRENCY) {
+    await Promise.all(
+      updates.slice(i, i + CONCURRENCY).map(({ id, pornstars }) =>
+        db.update(videosTable).set({ pornstars }).where(eq(videosTable.id, id)),
+      ),
+    );
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  process.stdout.write(
+    `\n🛠️ [REPAIR] Associated performers for ${updates.length} gp- videos locally in ${elapsed} seconds!\n\n`,
+  );
+  logger.info(
+    { repaired: updates.length, total: gpVideos.length, elapsedSeconds: elapsed },
+    "autoPerformerRepair: complete",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Backup / Restore
 // ---------------------------------------------------------------------------
 
@@ -433,6 +508,9 @@ app.listen(port, (err?: Error) => {
 
         autoTagRepair().catch((err: unknown) =>
           logger.error({ err }, "autoTagRepair failed"),
+        );
+        autoPerformerRepair().catch((err: unknown) =>
+          logger.error({ err }, "autoPerformerRepair failed"),
         );
 
         // Restore → purge stale rows → arm backup interval → then start backfill.
