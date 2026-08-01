@@ -77,7 +77,7 @@ function HeroSlider() {
 
   return (
     <section className="mx-auto max-w-[1400px] px-2 pt-6 sm:px-6">
-      <div className="overflow-hidden rounded-sm border border-[color:var(--hairline)] bg-black">
+      <div className="overflow-hidden rounded-sm border-none bg-black">
         <div className="relative aspect-video w-full sm:aspect-[21/9]">
           {heroSlides.map((s, idx) => (
             <img

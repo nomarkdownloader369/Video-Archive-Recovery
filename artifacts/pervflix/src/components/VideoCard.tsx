@@ -104,7 +104,7 @@ export function VideoCard({ video }: { video: Video }) {
     >
       {/* ── Thumbnail (wrapped in Link for navigation) ──────────────────── */}
       <Link to="/video/$slug" params={{ slug: video.slug }} className="block">
-      <div className="relative aspect-video w-full overflow-hidden rounded-sm border border-[color:var(--hairline)] bg-black transition-all duration-300 group-hover:border-primary/70 group-hover:shadow-[0_0_22px_rgba(230,0,0,0.45)]">
+      <div className="relative aspect-video w-full overflow-hidden rounded-sm border-none bg-black transition-all duration-300 group-hover:shadow-[0_0_22px_rgba(230,0,0,0.45)]">
         {frames.map((src, idx) => (
           <img
             key={src}

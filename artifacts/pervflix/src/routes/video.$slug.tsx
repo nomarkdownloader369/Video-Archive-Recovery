@@ -152,7 +152,7 @@ function WatchPage() {
         {/* ── Player column ───────────────────────────────────────────────── */}
         <div className="min-w-0">
           {/* Player */}
-          <div className="relative aspect-video w-full overflow-hidden rounded-sm border border-[color:var(--hairline)] bg-black">
+          <div className="relative aspect-video w-full overflow-hidden rounded-sm border-none bg-black">
             {video.embed_url ? (
               isDirectVideo ? (
                 /* Direct MP4 — HTML5 native player, no referrer restrictions */
