@@ -858,7 +858,7 @@ export async function scrapeLatest(pagesCount = 3): Promise<void> {
       .select({ slug: videosTable.slug })
       .from(videosTable)
       .where(inArray(videosTable.slug, candidates.map((v) => v.slug)));
-    const existingSlugs = new Set(existingRows.map((r) => r.slug));
+    const existingSlugs = new Set(existingRows.map((r: { slug: string }) => r.slug));
     newVideos = candidates.filter((v) => !existingSlugs.has(v.slug));
     logger.info(
       { candidates: candidates.length, alreadyKnown: existingSlugs.size, newVideos: newVideos.length },

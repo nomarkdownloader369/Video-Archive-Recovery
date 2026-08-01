@@ -292,47 +292,77 @@ const PERFORMER_FALLBACK_PHOTO =
   "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80";
 
 router.get("/browse/pornstars", async (req: Request, res: Response) => {
-  const result = await db.execute<{
-    pornstar: string;
+  // Fetch only the fields we need — avoids pulling full video rows
+  const videos = await db
+    .select({
+      pornstars:     videosTable.pornstars,
+      thumbnail_url: videosTable.thumbnail_url,
+      views:         videosTable.views,
+    })
+    .from(videosTable)
+    .where(eq(videosTable.status, "published"));
+
+  // In-memory aggregation — immune to SQL unnest / GROUP BY dialect issues
+  type PerformerEntry = {
     video_count: number;
     total_views: number;
-    top_thumbnail: string | null;
-  }>(sql`
-    SELECT
-      unnest(pornstars)                                         AS pornstar,
-      cast(count(*) as int)                                     AS video_count,
-      cast(sum(views) as int)                                   AS total_views,
-      (array_agg(thumbnail_url ORDER BY views DESC NULLS LAST))[1] AS top_thumbnail
-    FROM ${videosTable}
-    WHERE status = 'published'
-    GROUP BY pornstar
-  `);
+    // Each video this performer appears in, kept for top-thumbnail resolution
+    videoRefs: { thumbnail_url: string | null; views: number | null }[];
+  };
 
-  const dbMap = new Map<string, { video_count: number; total_views: number; top_thumbnail: string | null }>();
-  for (const row of result.rows) {
-    if (row.pornstar) {
-      dbMap.set(row.pornstar.toLowerCase().trim(), {
-        video_count:   row.video_count   ?? 0,
-        total_views:   row.total_views   ?? 0,
-        top_thumbnail: row.top_thumbnail ?? null,
-      });
+  const performerMap = new Map<string, PerformerEntry>();
+
+  for (const video of videos) {
+    const stars = video.pornstars ?? [];
+    for (const raw of stars) {
+      if (!raw) continue;
+      const name = raw.trim();
+      if (!name) continue;
+
+      const existing = performerMap.get(name);
+      if (existing) {
+        existing.video_count += 1;
+        existing.total_views += video.views ?? 0;
+        existing.videoRefs.push({ thumbnail_url: video.thumbnail_url, views: video.views });
+      } else {
+        performerMap.set(name, {
+          video_count: 1,
+          total_views: video.views ?? 0,
+          videoRefs: [{ thumbnail_url: video.thumbnail_url, views: video.views }],
+        });
+      }
     }
   }
 
   const BASE = req.protocol + "://" + req.get("host");
 
-  const data = PERFORMER_WHITELIST_ROUTES.map(({ name, slug }) => {
-    const stats       = dbMap.get(name.toLowerCase().trim());
-    const video_count = stats?.video_count   ?? 0;
-    const total_views = stats?.total_views   ?? 0;
-    const top_thumb   = stats?.top_thumbnail ?? null;
+  // Build slug from performer name (e.g. "Lana Rhoades" → "lana-rhoades")
+  const toSlug = (name: string) =>
+    name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-    const photo = top_thumb
-      ? `${BASE}/api/pf/thumb?url=${encodeURIComponent(top_thumb)}`
-      : PERFORMER_FALLBACK_PHOTO;
+  const data = Array.from(performerMap.entries())
+    .map(([name, entry]) => {
+      // Pick the thumbnail from the highest-viewed video for this performer
+      const topThumb = entry.videoRefs
+        .slice()
+        .sort((a, b) => (b.views ?? 0) - (a.views ?? 0))
+        .find((v) => v.thumbnail_url)?.thumbnail_url ?? null;
 
-    return { name, slug, video_count, total_views, photo };
-  });
+      const photo = topThumb
+        ? `${BASE}/api/pf/thumb?url=${encodeURIComponent(topThumb)}`
+        : PERFORMER_FALLBACK_PHOTO;
+
+      return {
+        name,
+        slug:        toSlug(name),
+        video_count: entry.video_count,
+        total_views: entry.total_views,
+        photo,
+      };
+    })
+    // Sort by most videos first, then alphabetically for ties
+    .sort((a, b) => b.video_count - a.video_count || a.name.localeCompare(b.name))
+    .slice(0, 349);
 
   res.json({ data });
 });

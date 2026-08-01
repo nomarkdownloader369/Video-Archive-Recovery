@@ -68,7 +68,7 @@ async function autoTagRepair(): Promise<void> {
 
   for (const video of allVideos) {
     const titleLower      = video.title.toLowerCase();
-    const existingTagsLow = new Set(video.tags.map((t) => t.toLowerCase()));
+    const existingTagsLow = new Set(video.tags.map((t: string) => t.toLowerCase()));
     const toAdd: string[] = [];
 
     for (const rule of REPAIR_RULES) {
@@ -143,7 +143,7 @@ async function autoPerformerRepair(): Promise<void> {
 
   for (const video of gpVideos) {
     const titleLower = video.title.toLowerCase();
-    const existing   = new Set(video.pornstars.map((p) => p.toLowerCase()));
+    const existing   = new Set(video.pornstars.map((p: string) => p.toLowerCase()));
     const toAdd: string[] = [];
 
     for (const name of performerList) {
