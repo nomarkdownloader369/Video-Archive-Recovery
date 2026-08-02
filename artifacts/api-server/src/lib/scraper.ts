@@ -237,18 +237,23 @@ async function fetchHtmlFrom(url: string, referer: string): Promise<string | nul
 export function extractPerformersFromGpTitle(title: string): string[] {
   // Capture everything between the closing ] and the subtitle separator.
   // Accepts – (U+2013), — (U+2014), or a spaced ASCII hyphen " - ".
-  const match = title.match(/\]\s*([^–—\-]+?)\s*(?:–|—|\s+-\s+)/);
+  let match = title.match(/\]\s*([^–—]+?)\s*(?:–|—)/);
+  if (!match) {
+    // Non-bracket format: "Studio YY MM DD Name1[,&]Name2 – Video Title"
+    match = title.match(/^[\w]+(?:\s+\d{2}){3}\s+(.+?)\s*(?:–|—)/);
+  }
   if (!match) return [];
+  // Split on comma or ampersand, require ≥ 4 chars to filter out "Ali", "Ivo", etc.
   return match[1]
-    .split(",")
+    .split(/[,&]/)
     .map((n) => n.trim())
-    .filter((n) => n.length >= 3);
+    .filter((n) => n.length >= 4);
 }
 
 export function dedupePerformerNames(names: string[]): string[] {
-  // Drop anything shorter than 3 characters — catches navigation artefacts like "Vi"
-  // This filter runs BEFORE the early-return so single-element arrays like ["Vi"] are cleaned.
-  const filtered = names.filter((n) => n.trim().length >= 3);
+  // Drop anything shorter than 4 characters — catches "Vi" (2), "Ali" (3), "Ivo" (3), etc.
+  // This filter runs BEFORE the early-return so single-element arrays like ["Ali"] are cleaned.
+  const filtered = names.filter((n) => n.trim().length >= 4);
   if (filtered.length < 2) return filtered;
   const sorted  = [...filtered].sort((a, b) => b.length - a.length);
   const accepted: string[] = [];
