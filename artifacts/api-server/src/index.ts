@@ -12,6 +12,7 @@ import {
   scrapeByPerformers,
   seedWhitelistedPerformers,
   scrapeGalaxyPorn,
+  dedupePerformerNames,
 } from "./lib/scraper";
 
 // 7 empty/low-video categories seeded immediately on boot via targeted keyword search.
@@ -149,13 +150,24 @@ async function autoPerformerRepair(): Promise<void> {
     for (const name of performerList) {
       if (!name) continue;
       if (existing.has(name.toLowerCase())) continue;
-      if (titleLower.includes(name.toLowerCase())) {
-        toAdd.push(name);
-      }
+
+      // Use word-boundary regex for single-word names to prevent false substring
+      // matches: "Ali" must not match inside "Natalie", "reality", "Alison", etc.
+      // Multi-word names (e.g. "Sarah Vandella") still use plain includes().
+      const nameLower   = name.trim().toLowerCase();
+      const nameWords   = nameLower.split(/\s+/);
+      const escaped     = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const matchesTitle = nameWords.length === 1
+        ? new RegExp(`\\b${escaped}\\b`).test(titleLower)
+        : titleLower.includes(nameLower);
+
+      if (matchesTitle) toAdd.push(name);
     }
 
     if (toAdd.length > 0) {
-      const uniquePornstars = [...new Set([...video.pornstars, ...toAdd])];
+      // Dedup partial names in the merged array before writing
+      const merged          = [...new Set([...video.pornstars, ...toAdd])];
+      const uniquePornstars = dedupePerformerNames(merged);
       updates.push({ id: video.id, pornstars: uniquePornstars });
     }
   }
@@ -184,32 +196,8 @@ async function autoPerformerRepair(): Promise<void> {
 // autoPerformerCleanup — algorithmic deduplication of partial/substring names
 // ---------------------------------------------------------------------------
 
-/**
- * Removes any name from a pornstars array that is a pure substring of a longer
- * name already present in the same array.
- *
- * Algorithm:
- *   1. Sort names longest-first.
- *   2. Walk the sorted list; accept a name only if no already-accepted name
- *      contains it as a substring (case-insensitive, both sides trimmed).
- *
- * Examples:
- *   ["Sarah Vandella", "Sarah", "Ella"]  → ["Sarah Vandella"]
- *   ["Andi James", "James"]              → ["Andi James"]
- *   ["Wendy Raine", "Raine"]             → ["Wendy Raine"]
- *   ["Angela White", "Mia Malkova"]      → ["Angela White", "Mia Malkova"] (no collision)
- */
-function dedupePerformerNames(names: string[]): string[] {
-  if (names.length < 2) return names;
-  const sorted  = [...names].sort((a, b) => b.length - a.length);
-  const accepted: string[] = [];
-  for (const name of sorted) {
-    const nl = name.trim().toLowerCase();
-    const isSubstring = accepted.some((a) => a.trim().toLowerCase().includes(nl));
-    if (!isSubstring) accepted.push(name);
-  }
-  return accepted;
-}
+// dedupePerformerNames is imported from ./lib/scraper (exported there as the
+// single source of truth used by all scraper pipelines AND the cleanup pass).
 
 async function autoPerformerCleanup(): Promise<void> {
   const start = Date.now();
@@ -583,12 +571,14 @@ app.listen(port, (err?: Error) => {
         autoTagRepair().catch((err: unknown) =>
           logger.error({ err }, "autoTagRepair failed"),
         );
-        autoPerformerRepair().catch((err: unknown) =>
-          logger.error({ err }, "autoPerformerRepair failed"),
-        );
-        autoPerformerCleanup().catch((err: unknown) =>
-          logger.error({ err }, "autoPerformerCleanup failed"),
-        );
+        // Run repair first, then cleanup sequentially so cleanup always
+        // catches whatever repair injects (prevents the startup race where
+        // cleanup finished before repair wrote its gp- performer additions).
+        autoPerformerRepair()
+          .then(() => autoPerformerCleanup())
+          .catch((err: unknown) =>
+            logger.error({ err }, "autoPerformerRepair/Cleanup failed"),
+          );
 
         // Restore → purge stale rows → arm backup interval → then start backfill.
         // The backfill is chained INSIDE the restore/purge promise so that

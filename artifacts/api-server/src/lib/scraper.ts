@@ -222,7 +222,7 @@ async function fetchHtmlFrom(url: string, referer: string): Promise<string | nul
  * Algorithm: sort longest-first → accept a name only when no already-accepted
  * name already contains it.
  */
-function dedupePerformerNames(names: string[]): string[] {
+export function dedupePerformerNames(names: string[]): string[] {
   if (names.length < 2) return names;
   const sorted  = [...names].sort((a, b) => b.length - a.length);
   const accepted: string[] = [];
@@ -691,7 +691,12 @@ async function enrichWithDetailPages(videos: ScrapedVideo[]): Promise<ScrapedVid
           enriched[realIdx] = {
             ...v,
             embed_url: embedUrl ?? v.embed_url,
-            pornstars: performers.length > 0 ? performers : v.pornstars,
+            // Deduplicate partial/substring names at the enrichment layer so
+            // every scraper path (studios, latest, deep, seed, performers) is
+            // covered regardless of what the source site returns.
+            pornstars: dedupePerformerNames(
+              performers.length > 0 ? performers : v.pornstars,
+            ),
             studio: v.studio ?? studio,
             tags: mergedTags,
           };
