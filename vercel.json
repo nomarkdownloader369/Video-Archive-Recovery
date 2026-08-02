@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://4irhq7do78.janeway.replit.dev/api/:path*"
+    },
+    {
+      "source": "/((?!assets|logo|favicon|favicon.png|logo-horizontal.png|logo-vertical.png|api).*)/?",
+      "destination": "/artifacts/pervflix/dist/index.html"
+    }
+  ]
+}
