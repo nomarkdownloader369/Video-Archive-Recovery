@@ -222,6 +222,29 @@ async function fetchHtmlFrom(url: string, referer: string): Promise<string | nul
  * Algorithm: sort longest-first → accept a name only when no already-accepted
  * name already contains it.
  */
+/**
+ * Extracts performer names from a GalaxyPorn-style video title.
+ *
+ * GalaxyPorn titles follow the format:
+ *   "[Studio] Name1, Name2 – Actual Video Title"
+ *
+ * This function pulls the comma-separated names between ']' and the em-dash
+ * (or spaced hyphen), discarding any fragment shorter than 3 characters
+ * (catches navigation artefacts like "Vi").
+ *
+ * Returns an empty array if the title doesn't match the expected format.
+ */
+export function extractPerformersFromGpTitle(title: string): string[] {
+  // Capture everything between the closing ] and the subtitle separator.
+  // Accepts – (U+2013), — (U+2014), or a spaced ASCII hyphen " - ".
+  const match = title.match(/\]\s*([^–—\-]+?)\s*(?:–|—|\s+-\s+)/);
+  if (!match) return [];
+  return match[1]
+    .split(",")
+    .map((n) => n.trim())
+    .filter((n) => n.length >= 3);
+}
+
 export function dedupePerformerNames(names: string[]): string[] {
   if (names.length < 2) return names;
   const sorted  = [...names].sort((a, b) => b.length - a.length);
@@ -1596,7 +1619,8 @@ function extractGalaxyPornMeta(html: string): {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   $("a[href*='/pornstar/'], a[href*='/model/'], a[href*='/models/'], a[href*='/actress/']").each((_: number, el: any) => {
     const name = $(el).text().trim();
-    if (name && name.length > 1 && !perfSeen.has(name)) {
+    // Require ≥ 3 characters — filters out 2-char nav artefacts like "Vi"
+    if (name && name.length >= 3 && !perfSeen.has(name)) {
       perfSeen.add(name);
       performers.push(name);
     }
@@ -1739,6 +1763,11 @@ export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
 
         const familyKeyword = detectFamilyKeyword(title, []);
 
+        // Seed performers from the title (ground truth for GalaxyPorn).
+        // The title format "[Studio] Name1, Name2 – Video Title" always lists
+        // all performers; the detail-page links often miss the second actress.
+        const titlePerformers = extractPerformersFromGpTitle(title);
+
         candidates.push({
           slug:             rawSlug,
           title,
@@ -1755,7 +1784,7 @@ export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
           studio:           null,
           release_year:     simulateReleaseYear(),
           tags:             familyKeyword ? [familyKeyword, "taboo"] : ["taboo"],
-          pornstars:        [],
+          pornstars:        titlePerformers,
           status:           "published",
           _familyKeyword:   familyKeyword,
         });
@@ -1798,7 +1827,14 @@ export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
         const tagSet = new Set<string>(v.tags);
         for (const t of detailTags) tagSet.add(t);
 
-        const rawPornstars = performers.length > 0 ? performers : v.pornstars;
+        // Merge title-seeded names (v.pornstars, from extractPerformersFromGpTitle)
+        // with any extra names the detail page found, then dedup partial substrings.
+        // Title names are the primary source of truth; detail-page names supplement.
+        const detailOnly = performers.filter(
+          (p) => !v.pornstars.some((n) => n.toLowerCase() === p.toLowerCase()),
+        );
+        const mergedPerformers = [...v.pornstars, ...detailOnly];
+        const rawPornstars = mergedPerformers.length > 0 ? mergedPerformers : v.pornstars;
         const enriched: ScrapedVideo = {
           ...v,
           embed_url:        embedUrl,
