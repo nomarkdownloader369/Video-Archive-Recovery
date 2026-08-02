@@ -246,8 +246,11 @@ export function extractPerformersFromGpTitle(title: string): string[] {
 }
 
 export function dedupePerformerNames(names: string[]): string[] {
-  if (names.length < 2) return names;
-  const sorted  = [...names].sort((a, b) => b.length - a.length);
+  // Drop anything shorter than 3 characters — catches navigation artefacts like "Vi"
+  // This filter runs BEFORE the early-return so single-element arrays like ["Vi"] are cleaned.
+  const filtered = names.filter((n) => n.trim().length >= 3);
+  if (filtered.length < 2) return filtered;
+  const sorted  = [...filtered].sort((a, b) => b.length - a.length);
   const accepted: string[] = [];
   for (const name of sorted) {
     const nl = name.trim().toLowerCase();

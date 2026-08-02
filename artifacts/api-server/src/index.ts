@@ -13,6 +13,7 @@ import {
   seedWhitelistedPerformers,
   scrapeGalaxyPorn,
   dedupePerformerNames,
+  extractPerformersFromGpTitle,
 } from "./lib/scraper";
 
 // 7 empty/low-video categories seeded immediately on boot via targeted keyword search.
@@ -114,6 +115,7 @@ async function autoPerformerRepair(): Promise<void> {
   const start = Date.now();
 
   // 1. Collect all distinct performer names already present across the whole DB
+  //    (used for the secondary gp- DB-match pass)
   const dbPerformers = await db.execute(sql`
     SELECT DISTINCT unnest(${videosTable.pornstars}) AS name
     FROM ${videosTable}
@@ -121,58 +123,69 @@ async function autoPerformerRepair(): Promise<void> {
   `);
   const performerList = (dbPerformers.rows as Array<Record<string, unknown>>)
     .map((r) => r["name"] as string)
-    .filter(Boolean);
+    .filter((n) => Boolean(n) && n.trim().length >= 3);
 
-  if (performerList.length === 0) return;
-
-  // 2. Fetch ONLY GalaxyPorn-sourced rows — HQporner rows are strictly excluded
-  const gpVideos = await db
+  // 2. Fetch ALL published videos — both HQporner and GalaxyPorn need title repair
+  const allVideos = await db
     .select({
       id:        videosTable.id,
       title:     videosTable.title,
+      slug:      videosTable.slug,
       pornstars: videosTable.pornstars,
     })
     .from(videosTable)
-    .where(
-      sql`${videosTable.slug} LIKE 'gp-%' OR ${videosTable.embed_url} LIKE '%galaxyporn.net%'`,
-    );
+    .where(eq(videosTable.status, "published"));
 
-  if (gpVideos.length === 0) return;
+  if (allVideos.length === 0) return;
 
-  // 3. Scan each gp- title for performer names missing from its pornstars array
   const updates: Array<{ id: number; pornstars: string[] }> = [];
 
-  for (const video of gpVideos) {
-    const titleLower = video.title.toLowerCase();
-    const existing   = new Set(video.pornstars.map((p: string) => p.toLowerCase()));
+  for (const video of allVideos) {
+    const existing = new Set(video.pornstars.map((p: string) => p.toLowerCase()));
     const toAdd: string[] = [];
 
-    for (const name of performerList) {
-      if (!name) continue;
-      if (existing.has(name.toLowerCase())) continue;
+    // ── Pass A: extract names directly from the structured title ─────────────
+    // Both HQporner and GalaxyPorn use "[Studio] Name1, Name2 – Movie Title".
+    // extractPerformersFromGpTitle handles the parse; names < 3 chars are dropped.
+    const fromTitle = extractPerformersFromGpTitle(video.title);
+    for (const name of fromTitle) {
+      if (!existing.has(name.toLowerCase())) {
+        toAdd.push(name);
+        existing.add(name.toLowerCase());
+      }
+    }
 
-      // Use word-boundary regex for single-word names to prevent false substring
-      // matches: "Ali" must not match inside "Natalie", "reality", "Alison", etc.
-      // Multi-word names (e.g. "Sarah Vandella") still use plain includes().
-      const nameLower   = name.trim().toLowerCase();
-      const nameWords   = nameLower.split(/\s+/);
-      const escaped     = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const matchesTitle = nameWords.length === 1
-        ? new RegExp(`\\b${escaped}\\b`).test(titleLower)
-        : titleLower.includes(nameLower);
-
-      if (matchesTitle) toAdd.push(name);
+    // ── Pass B: for GalaxyPorn rows, also cross-match the full DB performer pool
+    // This catches performers whose names happen NOT to appear in the title segment
+    // (e.g. listed on the source page but not in the title) and were already indexed
+    // from another video.
+    const isGp = video.slug.startsWith("gp-");
+    if (isGp && performerList.length > 0) {
+      const titleLower = video.title.toLowerCase();
+      for (const name of performerList) {
+        if (existing.has(name.toLowerCase())) continue;
+        // Word-boundary regex for single-word names; plain includes() for multi-word
+        const nameLower  = name.trim().toLowerCase();
+        const nameWords  = nameLower.split(/\s+/);
+        const escaped    = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const inTitle    = nameWords.length === 1
+          ? new RegExp(`\\b${escaped}\\b`).test(titleLower)
+          : titleLower.includes(nameLower);
+        if (inTitle) {
+          toAdd.push(name);
+          existing.add(nameLower);
+        }
+      }
     }
 
     if (toAdd.length > 0) {
-      // Dedup partial names in the merged array before writing
       const merged          = [...new Set([...video.pornstars, ...toAdd])];
       const uniquePornstars = dedupePerformerNames(merged);
       updates.push({ id: video.id, pornstars: uniquePornstars });
     }
   }
 
-  // 4. Apply updates (batched, 50 concurrent writes)
+  // 3. Apply updates (batched, 50 concurrent writes)
   const CONCURRENCY = 50;
   for (let i = 0; i < updates.length; i += CONCURRENCY) {
     await Promise.all(
@@ -184,10 +197,10 @@ async function autoPerformerRepair(): Promise<void> {
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   process.stdout.write(
-    `\n🛠️ [REPAIR] Associated performers for ${updates.length} gp- videos locally in ${elapsed} seconds!\n\n`,
+    `\n🛠️ [REPAIR] Associated performers for ${updates.length} videos locally in ${elapsed} seconds!\n\n`,
   );
   logger.info(
-    { repaired: updates.length, total: gpVideos.length, elapsedSeconds: elapsed },
+    { repaired: updates.length, total: allVideos.length, elapsedSeconds: elapsed },
     "autoPerformerRepair: complete",
   );
 }
@@ -212,7 +225,7 @@ async function autoPerformerCleanup(): Promise<void> {
   const updates: Array<{ id: number; pornstars: string[] }> = [];
 
   for (const video of videos) {
-    if (!video.pornstars || video.pornstars.length < 2) continue;
+    if (!video.pornstars || video.pornstars.length === 0) continue;
 
     const cleaned = dedupePerformerNames(video.pornstars as string[]);
     const removed  = video.pornstars.length - cleaned.length;
