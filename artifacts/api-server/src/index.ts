@@ -3,7 +3,7 @@ import path from "node:path";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { db, videosTable } from "@workspace/db";
-import { sql, eq } from "drizzle-orm";
+import { sql, eq, or, like } from "drizzle-orm";
 import {
   scrapeLatest,
   scrapeDeep,
@@ -252,6 +252,39 @@ async function autoPerformerCleanup(): Promise<void> {
   logger.info(
     { purgeCount, videosScanned: videos.length, rowsUpdated: updates.length, elapsedSeconds: elapsed },
     "autoPerformerCleanup: complete",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// autoQualityRepair — fix incorrect quality_label on GalaxyPorn rows
+// ---------------------------------------------------------------------------
+
+async function autoQualityRepair(): Promise<void> {
+  const start = Date.now();
+
+  const gpVideos = await db
+    .select({ id: videosTable.id, title: videosTable.title, quality_label: videosTable.quality_label })
+    .from(videosTable)
+    .where(or(like(videosTable.slug, "gp-%"), like(videosTable.embed_url, "%galaxyporn.net%")));
+
+  let corrected = 0;
+  for (const video of gpVideos) {
+    if (video.quality_label !== "4K") continue;
+    const titleLc = video.title.toLowerCase();
+    const is4K = titleLc.includes("4k") || titleLc.includes("2160p");
+    if (!is4K) {
+      await db.update(videosTable).set({ quality_label: "1080p" }).where(eq(videosTable.id, video.id));
+      corrected++;
+    }
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  process.stdout.write(
+    `\n🛠️ [REPAIR] Instantly corrected quality labels for ${corrected} second-source videos locally in ${elapsed} second!\n\n`,
+  );
+  logger.info(
+    { corrected, total: gpVideos.length, elapsedSeconds: elapsed },
+    "autoQualityRepair: complete",
   );
 }
 
@@ -592,6 +625,9 @@ app.listen(port, (err?: Error) => {
           .catch((err: unknown) =>
             logger.error({ err }, "autoPerformerRepair/Cleanup failed"),
           );
+        autoQualityRepair().catch((err: unknown) =>
+          logger.error({ err }, "autoQualityRepair failed"),
+        );
 
         // Restore → purge stale rows → arm backup interval → then start backfill.
         // The backfill is chained INSIDE the restore/purge promise so that

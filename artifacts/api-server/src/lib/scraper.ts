@@ -1787,7 +1787,14 @@ export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
           duration_text:    durText,
           views:            simulateViews(0),
           likes:            0,
-          quality_label:    "4K",
+          quality_label:    (() => {
+            const lc = title.toLowerCase();
+            const initialTags = familyKeyword ? [familyKeyword, "taboo"] : ["taboo"];
+            const has4K = lc.includes("4k") || lc.includes("2160p") ||
+              initialTags.map((t) => t.toLowerCase()).includes("4k") ||
+              initialTags.map((t) => t.toLowerCase()).includes("2160p");
+            return (has4K ? "4K" : "1080p") as "4K" | "1080p";
+          })(),
           category:         familyKeyword ? "family" : "taboo",
           studio:           null,
           release_year:     simulateReleaseYear(),
@@ -1843,6 +1850,10 @@ export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
         );
         const mergedPerformers = [...v.pornstars, ...detailOnly];
         const rawPornstars = mergedPerformers.length > 0 ? mergedPerformers : v.pornstars;
+        const mergedTags = Array.from(tagSet);
+        const titleLcQ = v.title.toLowerCase();
+        const has4KDetail = titleLcQ.includes("4k") || titleLcQ.includes("2160p") ||
+          mergedTags.some((t) => t.toLowerCase() === "4k" || t.toLowerCase() === "2160p");
         const enriched: ScrapedVideo = {
           ...v,
           embed_url:        embedUrl,
@@ -1850,7 +1861,8 @@ export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
           duration_text:    detailDur > 0
             ? `${Math.floor(detailDur / 60)}m ${detailDur % 60}s`
             : v.duration_text,
-          tags:      Array.from(tagSet),
+          tags:          mergedTags,
+          quality_label: has4KDetail ? "4K" : "1080p",
           // Deduplicate partial/substring names before persisting
           pornstars: dedupePerformerNames(rawPornstars),
           studio:    v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
