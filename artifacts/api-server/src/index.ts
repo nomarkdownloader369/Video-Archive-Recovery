@@ -181,20 +181,35 @@ async function autoPerformerRepair(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// autoPerformerCleanup — surgical removal of partial/substring performer names
+// autoPerformerCleanup — algorithmic deduplication of partial/substring names
 // ---------------------------------------------------------------------------
 
 /**
- * Maps each canonical full-name to the partial/single-word aliases it subsumes.
- * When a video row contains BOTH the canonical name AND a partial alias, the
- * alias was falsely injected (substring match) and must be removed.
+ * Removes any name from a pornstars array that is a pure substring of a longer
+ * name already present in the same array.
+ *
+ * Algorithm:
+ *   1. Sort names longest-first.
+ *   2. Walk the sorted list; accept a name only if no already-accepted name
+ *      contains it as a substring (case-insensitive, both sides trimmed).
+ *
+ * Examples:
+ *   ["Sarah Vandella", "Sarah", "Ella"]  → ["Sarah Vandella"]
+ *   ["Andi James", "James"]              → ["Andi James"]
+ *   ["Wendy Raine", "Raine"]             → ["Wendy Raine"]
+ *   ["Angela White", "Mia Malkova"]      → ["Angela White", "Mia Malkova"] (no collision)
  */
-const PERFORMER_COLLISION_RULES: Array<{ canonical: string; partials: string[] }> = [
-  { canonical: "Sarah Vandella", partials: ["Sarah", "Ella"] },
-  { canonical: "Andi James",     partials: ["James"] },
-  { canonical: "Wendy Raine",    partials: ["Raine"] },
-  { canonical: "Rachel Steele",  partials: ["Steele"] },
-];
+function dedupePerformerNames(names: string[]): string[] {
+  if (names.length < 2) return names;
+  const sorted  = [...names].sort((a, b) => b.length - a.length);
+  const accepted: string[] = [];
+  for (const name of sorted) {
+    const nl = name.trim().toLowerCase();
+    const isSubstring = accepted.some((a) => a.trim().toLowerCase().includes(nl));
+    if (!isSubstring) accepted.push(name);
+  }
+  return accepted;
+}
 
 async function autoPerformerCleanup(): Promise<void> {
   const start = Date.now();
@@ -211,26 +226,11 @@ async function autoPerformerCleanup(): Promise<void> {
   for (const video of videos) {
     if (!video.pornstars || video.pornstars.length < 2) continue;
 
-    // Build a lowercase set for O(1) collision look-up
-    const nameSet = new Set(video.pornstars.map((p: string) => p.trim().toLowerCase()));
-    const toRemove = new Set<string>();
+    const cleaned = dedupePerformerNames(video.pornstars as string[]);
+    const removed  = video.pornstars.length - cleaned.length;
+    if (removed === 0) continue;
 
-    for (const rule of PERFORMER_COLLISION_RULES) {
-      // Only act when the canonical full name is actually in this row
-      if (!nameSet.has(rule.canonical.trim().toLowerCase())) continue;
-      for (const partial of rule.partials) {
-        if (nameSet.has(partial.trim().toLowerCase())) {
-          toRemove.add(partial.trim().toLowerCase());
-        }
-      }
-    }
-
-    if (toRemove.size === 0) continue;
-
-    const cleaned = video.pornstars.filter(
-      (p: string) => !toRemove.has(p.trim().toLowerCase()),
-    );
-    purgeCount += video.pornstars.length - cleaned.length;
+    purgeCount += removed;
     updates.push({ id: video.id, pornstars: cleaned });
   }
 

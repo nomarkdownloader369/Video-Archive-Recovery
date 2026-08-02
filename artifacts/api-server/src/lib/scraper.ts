@@ -210,6 +210,32 @@ async function fetchHtmlFrom(url: string, referer: string): Promise<string | nul
 }
 
 // ---------------------------------------------------------------------------
+// dedupePerformerNames — algorithmic partial-name deduplicator
+// ---------------------------------------------------------------------------
+
+/**
+ * Removes any name that is a pure substring of a longer name already in the
+ * same array (case-insensitive, both sides trimmed).  Prevents false partials
+ * like "Sarah", "Ella", "James", "Raine" from co-existing with the full names
+ * "Sarah Vandella", "Cami Strella", "Andi James", "Wendy Raine".
+ *
+ * Algorithm: sort longest-first → accept a name only when no already-accepted
+ * name already contains it.
+ */
+function dedupePerformerNames(names: string[]): string[] {
+  if (names.length < 2) return names;
+  const sorted  = [...names].sort((a, b) => b.length - a.length);
+  const accepted: string[] = [];
+  for (const name of sorted) {
+    const nl = name.trim().toLowerCase();
+    if (!accepted.some((a) => a.trim().toLowerCase().includes(nl))) {
+      accepted.push(name);
+    }
+  }
+  return accepted;
+}
+
+// ---------------------------------------------------------------------------
 // Retry helper for DB operations
 // ---------------------------------------------------------------------------
 
@@ -881,6 +907,11 @@ export async function scrapeLatest(pagesCount = 3): Promise<void> {
     if (!v.studio) v.studio = pickSimulatedStudio(v._familyKeyword ?? null);
   }
 
+  // Deduplicate partial/substring performer names before any DB write
+  for (const v of valid) {
+    v.pornstars = dedupePerformerNames(v.pornstars);
+  }
+
   logger.info({ total: valid.length }, "scrapeLatest: upserting videos");
   await upsertBatch(valid);
   logger.info("scrapeLatest: complete");
@@ -1402,6 +1433,11 @@ export async function scrapeByPerformers(): Promise<void> {
         );
 
         if (withEmbed.length > 0) {
+          // Deduplicate partial/substring performer names before any DB write
+          for (const v of withEmbed) {
+            v.pornstars = dedupePerformerNames(v.pornstars);
+          }
+
           for (let bi = 0; bi < withEmbed.length; bi += BATCH_SIZE) {
             const chunk = withEmbed.slice(bi, bi + BATCH_SIZE);
             try {
@@ -1757,6 +1793,7 @@ export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
         const tagSet = new Set<string>(v.tags);
         for (const t of detailTags) tagSet.add(t);
 
+        const rawPornstars = performers.length > 0 ? performers : v.pornstars;
         const enriched: ScrapedVideo = {
           ...v,
           embed_url:        embedUrl,
@@ -1765,7 +1802,8 @@ export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
             ? `${Math.floor(detailDur / 60)}m ${detailDur % 60}s`
             : v.duration_text,
           tags:      Array.from(tagSet),
-          pornstars: performers.length > 0 ? performers : v.pornstars,
+          // Deduplicate partial/substring names before persisting
+          pornstars: dedupePerformerNames(rawPornstars),
           studio:    v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
         };
 
