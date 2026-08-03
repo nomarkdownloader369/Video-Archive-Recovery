@@ -2056,17 +2056,25 @@ function extractFXPornHDMeta(html: string): {
   }
 
   // ── Tags ──────────────────────────────────────────────────────────────────
+  // fxpornhd.com renders categories/tags as flat anchor buttons — scrape all
+  // three href patterns comprehensively, then filter noise words.
+  const FX_TAG_BLOCKLIST = new Set([
+    "categories", "fxpornhd", "hd porn", "porn", "free porn", "sex", "video",
+    "videos", "xxx", "adult", "tube", "watch", "online", "free", "full",
+  ]);
   const tags: string[] = [];
   const tagSeen = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $("a[href*='/category/'], a[href*='/tag/'], a[href*='/categories/']").each((_: number, el: any) => {
+  $("a[href*='/tag/'], a[href*='/tags/'], a[href*='/category/']").each((_: number, el: any) => {
     const href = $(el).attr("href") ?? "";
+    // Skip performer/studio links that may share these path segments
     if (
       href.includes("/pornstar/") || href.includes("/model/") ||
       href.includes("/actress/")  || href.includes("/studio/")
     ) return;
     const t = $(el).text().trim().toLowerCase();
     if (!t || t.length < 2 || t.length > 40) return;
+    if (FX_TAG_BLOCKLIST.has(t)) return;
     if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
   });
 
@@ -2087,31 +2095,32 @@ function extractFXPornHDMeta(html: string): {
 /**
  * Scrape fxpornhd.com for full-length videos — unrestricted (no studio filter).
  *
- * Crawls the main paginated listing (`/page/N/`), extracts every video card,
- * then fetches each detail page to obtain the real iframe embed URL, tags, and
- * performers.  Uses onConflictDoUpdate so repeat runs refresh view counts.
+ * Crawls the main paginated listing (`/page/N/`) recursively from page 1,
+ * incrementing until an empty/404 page is encountered or maxPages is reached.
+ * This enables a safe, complete historical backfill of up to 150+ pages.
+ * Uses onConflictDoUpdate so repeat runs refresh view counts.
  *
- * @param pagesCount Number of paginated listing pages to crawl (default 3).
+ * @param maxPages Hard ceiling on pages to crawl (default 150).
  */
-export async function scrapeFXPornHD(pagesCount = 3): Promise<void> {
-  logger.info({ pagesCount }, "scrapeFXPornHD: starting");
+export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
+  logger.info({ maxPages }, "scrapeFXPornHD: starting");
   process.stdout.write(
-    `\n[FXPORNHD] Starting scrape — up to ${pagesCount} listing pages\n`,
+    `\n[FXPORNHD] Starting deep backfill — crawling up to ${maxPages} pages (stops early on empty page)\n`,
   );
 
   const seenSlugs = new Set<string>();
   let totalSaved  = 0;
+  let page        = 1;
 
-  for (let page = 1; page <= pagesCount; page++) {
+  while (page <= maxPages) {
     const listUrl = page === 1
       ? `${FX_BASE}/`
       : `${FX_BASE}/page/${page}/`;
 
     const html = await fetchHtmlFrom(listUrl, FX_BASE);
     if (!html) {
-      process.stdout.write(`[FXPORNHD] Page ${page} — fetch failed, skipping\n`);
-      await delay(FX_DELAY_MS);
-      continue;
+      process.stdout.write(`[FXPORNHD] Page ${page} — fetch failed or 404, stopping crawl\n`);
+      break;
     }
 
     const $ = cheerio.load(html);
@@ -2192,9 +2201,8 @@ export async function scrapeFXPornHD(pagesCount = 3): Promise<void> {
     }
 
     if (videoLinks.length === 0) {
-      process.stdout.write(`[FXPORNHD] Page ${page} — no video cards found\n`);
-      await delay(FX_DELAY_MS);
-      continue;
+      process.stdout.write(`[FXPORNHD] Page ${page} — no video cards found, stopping crawl\n`);
+      break;
     }
 
     // Build candidate objects from listing data
@@ -2296,15 +2304,16 @@ export async function scrapeFXPornHD(pagesCount = 3): Promise<void> {
       // onConflictDoUpdate so repeat runs refresh view counts
       await upsertBatchWithViewUpdate([enriched]);
       savedThisPage++;
-      await delay(400);
+      await delay(500);
     }
 
     totalSaved += savedThisPage;
     process.stdout.write(
-      `[FXPORNHD] Page ${page}/${pagesCount} — +${savedThisPage} saved (${totalSaved} total)\n`,
+      `[FXPORNHD] Page ${page} — +${savedThisPage} saved (${totalSaved} total)\n`,
     );
     logger.info({ page, savedThisPage, totalSaved }, "scrapeFXPornHD: page complete");
-    await delay(FX_DELAY_MS);
+    await delay(500);
+    page++;
   }
 
   process.stdout.write(`\n[FXPORNHD] ✅ Complete — ${totalSaved} videos saved\n\n`);

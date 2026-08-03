@@ -435,6 +435,28 @@ async function restoreFromBackupIfNeeded(): Promise<void> {
 // from backup.json are also removed. galaxyporn.net replaces this source.
 // ---------------------------------------------------------------------------
 
+async function purgeAllFXPornHD(): Promise<void> {
+  try {
+    const result = await db.execute(
+      sql`DELETE FROM pf_videos WHERE slug LIKE ${'fx-%'}`,
+    );
+    const deleted = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+    if (deleted > 0) {
+      process.stdout.write(
+        `[CLEANUP] ✅ Purged ${deleted} fx- rows — clean re-crawl will repopulate with correct tags.\n`,
+      );
+      logger.info({ deleted }, "purgeAllFXPornHD: all fx- rows deleted");
+    } else {
+      process.stdout.write("[CLEANUP] No fx- rows found — DB is already clean.\n");
+    }
+  } catch (err) {
+    process.stdout.write(
+      `[CLEANUP] ⚠️  fx- purge failed: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    logger.error({ err }, "purgeAllFXPornHD: delete failed");
+  }
+}
+
 async function purgeAllFamilyPornHD(): Promise<void> {
   try {
     const result = await db.execute(
@@ -693,6 +715,7 @@ app.listen(port, (err?: Error) => {
         restoreFromBackupIfNeeded()
           .then(() => purgeFullHDPorn())
           .then(() => purgeAllFamilyPornHD())
+          .then(() => purgeAllFXPornHD())
           .then(() => {
             startBackupInterval();
 
