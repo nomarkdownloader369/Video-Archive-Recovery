@@ -234,17 +234,47 @@ async function fetchHtmlFrom(url: string, referer: string): Promise<string | nul
  *
  * Returns an empty array if the title doesn't match the expected format.
  */
+/**
+ * Words that appear as role/scenario descriptors in studio-date titles
+ * (e.g. "JapanHDV 25 08 26 Horny Boss Hatsune Roria …").
+ * When the first 2 title-case words extracted after the date prefix contain
+ * any of these, they describe a character type — not the performer's name —
+ * so we skip them and take the NEXT 2 title-case words as the real name.
+ */
+const ROLE_DESCRIPTOR_WORDS = new Set([
+  // Occupation / role nouns
+  "boss", "teacher", "professor", "instructor", "secretary", "assistant",
+  "manager", "director", "supervisor", "principal", "counselor", "coach",
+  "nurse", "doctor", "therapist", "librarian", "receptionist", "clerk",
+  "maid", "housewife", "wife", "neighbor", "colleague", "tutor", "trainer",
+  "babysitter", "nanny", "model", "actress", "idol", "milf", "cougar",
+  // Common adjective prefixes used in JapanHDV-style descriptors
+  "horny", "naughty", "busty", "sexy", "hot", "slutty", "dirty", "kinky",
+  "frisky", "flirty", "lusty", "wild", "wicked", "sultry", "hungry",
+  "needy", "greedy", "desperate", "lewd", "randy", "eager", "cheeky",
+]);
+
+function isRoleDescriptor(twoWordPhrase: string): boolean {
+  return twoWordPhrase
+    .toLowerCase()
+    .split(/\s+/)
+    .some((w) => ROLE_DESCRIPTOR_WORDS.has(w));
+}
+
 export function extractPerformersFromGpTitle(title: string): string[] {
   // Helper: from a text segment, collect the first 2 consecutive Title-Case words
   // as a single performer name.  Stops at the first word that doesn't begin with
   // an uppercase letter (e.g. "Rewardingly", "Stepdads", "for" all break the run).
-  const extractName = (segment: string): string | null => {
+  // Returns { name, wordsConsumed } so callers can skip past role descriptors.
+  const extractName = (segment: string): { name: string; wordsConsumed: number } | null => {
     const words = segment.trim().split(/\s+/);
     const nameWords: string[] = [];
+    let consumed = 0;
     for (const w of words) {
       const clean = w.replace(/[^a-zA-Z''-]/g, "");
       if (clean.length >= 2 && /^[A-Z]/.test(clean)) {
         nameWords.push(clean);
+        consumed++;
         if (nameWords.length === 2) break;
       } else {
         break;
@@ -252,7 +282,8 @@ export function extractPerformersFromGpTitle(title: string): string[] {
     }
     if (nameWords.length < 2) return null;
     const name = nameWords.join(" ");
-    return name.length >= 4 && name.length <= 28 ? name : null;
+    if (name.length < 4 || name.length > 28) return null;
+    return { name, wordsConsumed: consumed };
   };
 
   // Pattern 1 & 2: em-dash separator present — existing reliable format
@@ -268,7 +299,7 @@ export function extractPerformersFromGpTitle(title: string): string[] {
       .filter((n) => n.length >= 4 && n.split(" ").length <= 3 && n.length <= 28);
   }
 
-  // Pattern 3: no em-dash — "Studio YY MM DD Name1[, Name2] Title [ 1080p]"
+  // Pattern 3: no em-dash — "Studio YY MM DD [Descriptor?] Name1[, Name2] Title"
   // Strip the leading "Studio YY MM DD " to isolate the performer+title portion.
   const afterDate = title.replace(/^[\w]+\s+\d{2}\s+\d{2}\s+\d{2}\s+/, "");
   if (!afterDate || afterDate === title) return [];
@@ -278,14 +309,27 @@ export function extractPerformersFromGpTitle(title: string): string[] {
   if (/[,&]/.test(afterDate.slice(0, 80))) {
     const segments = afterDate.slice(0, 80).split(/[,&]/);
     const names = segments
-      .map(extractName)
+      .map((seg) => extractName(seg)?.name ?? null)
       .filter((n): n is string => n !== null);
     if (names.length > 0) return names;
   }
 
-  // Single performer: take the first 2 Title-Case words after the date.
-  const name = extractName(afterDate);
-  return name ? [name] : [];
+  // Single performer — extract the first 2 title-case words.
+  // If they look like a role descriptor (e.g. "Horny Boss"), skip past them
+  // and try the next 2 title-case words as the real performer name.
+  let remainder = afterDate;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = extractName(remainder);
+    if (!result) break;
+    if (!isRoleDescriptor(result.name)) {
+      return [result.name];
+    }
+    // Skip past the descriptor words and try again
+    const skipped = remainder.trim().split(/\s+/).slice(result.wordsConsumed).join(" ");
+    if (!skipped || skipped === remainder) break;
+    remainder = skipped;
+  }
+  return [];
 }
 
 export function dedupePerformerNames(names: string[]): string[] {
