@@ -265,6 +265,52 @@ async function autoPerformerCleanup(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// autoPerformerSanityCleanup — remove long-sentence / corrupted performer names
+// ---------------------------------------------------------------------------
+
+async function autoPerformerSanityCleanup(): Promise<void> {
+  const start = Date.now();
+
+  const videos = await db
+    .select({ id: videosTable.id, pornstars: videosTable.pornstars })
+    .from(videosTable);
+
+  let removedCount = 0;
+  const updates: Array<{ id: number; pornstars: string[] }> = [];
+
+  for (const video of videos) {
+    if (!video.pornstars || video.pornstars.length === 0) continue;
+
+    const cleaned = (video.pornstars as string[]).filter(
+      (name) => name.split(" ").length <= 3 && name.length <= 28,
+    );
+    const removed = video.pornstars.length - cleaned.length;
+    if (removed === 0) continue;
+
+    removedCount += removed;
+    updates.push({ id: video.id, pornstars: cleaned });
+  }
+
+  const CONCURRENCY = 50;
+  for (let i = 0; i < updates.length; i += CONCURRENCY) {
+    await Promise.all(
+      updates.slice(i, i + CONCURRENCY).map(({ id, pornstars }) =>
+        db.update(videosTable).set({ pornstars }).where(eq(videosTable.id, id)),
+      ),
+    );
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  process.stdout.write(
+    `\n🛠️ [SANITY CLEANUP] Surgically removed ${removedCount} corrupted long-sentence performer names from the DB in ${elapsed} second!\n\n`,
+  );
+  logger.info(
+    { removedCount, videosScanned: videos.length, rowsUpdated: updates.length, elapsedSeconds: elapsed },
+    "autoPerformerSanityCleanup: complete",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // autoQualityRepair — fix incorrect quality_label on GalaxyPorn rows
 // ---------------------------------------------------------------------------
 
@@ -631,8 +677,9 @@ app.listen(port, (err?: Error) => {
         // cleanup finished before repair wrote its gp- performer additions).
         autoPerformerRepair()
           .then(() => autoPerformerCleanup())
+          .then(() => autoPerformerSanityCleanup())
           .catch((err: unknown) =>
-            logger.error({ err }, "autoPerformerRepair/Cleanup failed"),
+            logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup failed"),
           );
         autoQualityRepair().catch((err: unknown) =>
           logger.error({ err }, "autoQualityRepair failed"),

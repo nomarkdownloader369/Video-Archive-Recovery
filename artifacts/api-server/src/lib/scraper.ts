@@ -401,6 +401,7 @@ async function fetchDetailPage(sourceUrl: string): Promise<{
       const name = $(el).text().trim();
       if (!name || seen.has(name)) return;
       if (href.includes("/actress/") || href.includes("/pornstar/") || href.includes("/models/")) {
+        if (name.split(" ").length > 3 || name.length > 28) return;
         seen.add(name);
         performers.push(name);
       }
@@ -1629,6 +1630,7 @@ function extractGalaxyPornMeta(html: string): {
     const name = $(el).text().trim();
     // Require ≥ 3 characters — filters out 2-char nav artefacts like "Vi"
     if (name && name.length >= 3 && !perfSeen.has(name)) {
+      if (name.split(" ").length > 3 || name.length > 28) return;
       perfSeen.add(name);
       performers.push(name);
     }
