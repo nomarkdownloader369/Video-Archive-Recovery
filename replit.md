@@ -2,35 +2,46 @@
 
 A cinematic adult video streaming platform that aggregates 25,000+ studio-quality videos from curated sources, served through a custom dark-themed React interface with search, categories, performer pages, and a personal watchlist.
 
-## Stack
+## Architecture
 
-- **Frontend**: React + Vite + TanStack Router + Tailwind CSS (`artifacts/pervflix`)
-- **Backend**: Express.js API server with esbuild bundling (`artifacts/api-server`)
-- **Database**: PostgreSQL via Drizzle ORM (`lib/db`)
-- **API contract**: OpenAPI → Orval codegen (`lib/api-spec`, `lib/api-client-react`, `lib/api-zod`)
-- **Package manager**: pnpm workspaces
+This is a pnpm monorepo with two registered artifacts:
 
-## Running the project
+| Artifact | Path | Preview |
+|---|---|---|
+| PervFlix (React frontend) | `artifacts/pervflix/` | `/` |
+| API Server (Express backend) | `artifacts/api-server/` | `/api/` |
 
-Both services start automatically via managed artifact workflows:
+### Shared libraries (under `lib/`)
+- `lib/db` — Drizzle ORM schema + PostgreSQL client. Schema: `pf_videos` table.
+- `lib/api-spec` — OpenAPI spec + Orval codegen (generates React Query hooks & Zod schemas)
+- `lib/api-client-react` — Generated React Query hooks (consumed by the frontend)
+- `lib/api-zod` — Generated Zod schemas (consumed by the API server)
 
-- **Frontend** (`artifacts/pervflix: web`) — React app at `/`
-- **API server** (`artifacts/api-server: web`) — Express API at `/api/`
+## How to run
 
-To install dependencies: `pnpm install` (from workspace root)
+Both workflows start automatically. To restart manually:
+- Frontend: WorkflowsRestart `artifacts/pervflix: web`
+- API Server: WorkflowsRestart `artifacts/api-server: web`
 
-To push DB schema: `pnpm --filter @workspace/db run push`
+**After schema changes**, run: `pnpm --filter @workspace/db run push`
+
+**After OpenAPI spec changes**, run: `pnpm --filter @workspace/api-spec run codegen`
+
+## Database
+
+Uses Replit's built-in PostgreSQL. `DATABASE_URL` is set automatically.
+
+On first boot with an empty database, the API server auto-restores ~4,900+ videos from `artifacts/api-server/backup.json`. The scraper then fills in more content in the background.
 
 ## Key files
 
-- `artifacts/pervflix/src/` — React frontend source
-- `artifacts/api-server/src/` — Express server source (routes, middlewares, scrapers)
-- `artifacts/api-server/backup.json` — Video index backup (~6,000 rows); auto-restored on empty DB startup
-- `lib/db/src/schema/videos.ts` — Drizzle schema for `pf_videos` table
-- `lib/api-spec/openapi.yaml` — OpenAPI spec (run codegen after changes)
+- `artifacts/pervflix/src/` — React frontend (TanStack Router, Framer Motion, shadcn/ui)
+- `artifacts/api-server/src/index.ts` — Express entry point, scraper bootstrap, DB diagnostics
+- `artifacts/api-server/src/lib/scraper.ts` — HQporner / GalaxyPorn / FXPornHD scrapers
+- `artifacts/api-server/src/routes/` — API route handlers
+- `artifacts/api-server/backup.json` — Video index backup (source of truth for initial data — do not delete)
+- `lib/db/src/schema/videos.ts` — `pf_videos` table schema
 
-## Notes
+## User preferences
 
-- On first boot with empty DB, the server auto-restores from `backup.json` then begins scraping
-- Scraping runs every 4 hours (HQporner studios, keywords, performers, GalaxyPorn)
-- `backup.json` is refreshed every 15 minutes while running — do not delete it
+- Keep the existing dark-theme aesthetic for any UI changes
