@@ -1972,6 +1972,346 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
 }
 
 // ---------------------------------------------------------------------------
+// FXPornHD scraper — unrestricted third source
+// ---------------------------------------------------------------------------
+
+const FX_BASE     = "https://fxpornhd.com";
+const FX_DELAY_MS = 600;
+
+/**
+ * Parse the detail page of an fxpornhd.com video.
+ *
+ * Extracts:
+ *  - embedUrl   — the <iframe src> (prefers player.fxpornhd.com/embed/ or any
+ *                 other https embed player; falls back to the first iframe src)
+ *  - durationSeconds — from OG/meta or on-page text
+ *  - tags       — links under /category/ or /tag/
+ *  - performers — links under /pornstar/, /model/, /models/, or /actress/
+ */
+function extractFXPornHDMeta(html: string): {
+  embedUrl: string;
+  durationSeconds: number;
+  tags: string[];
+  performers: string[];
+} {
+  const $ = cheerio.load(html);
+
+  // ── Embed URL ──────────────────────────────────────────────────────────────
+  let embedUrl = "";
+
+  // Priority 1: dedicated FXPornHD player or known open embed players
+  const PREFERRED_PLAYER_PATTERNS = [
+    "player.fxpornhd.com/embed",
+    "fxpornhd.com/embed",
+    "embedsb.com",
+    "doodstream.com/e/",
+    "streamtape.com/e/",
+    "mixdrop.co/e/",
+  ];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  $("iframe[src]").each((_: number, el: any) => {
+    if (embedUrl) return; // already found
+    const src = $(el).attr("src") ?? "";
+    if (!src.startsWith("http")) return;
+    if (PREFERRED_PLAYER_PATTERNS.some((p) => src.includes(p))) {
+      embedUrl = src;
+    }
+  });
+
+  // Priority 2: any https iframe
+  if (!embedUrl) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    $("iframe[src]").each((_: number, el: any) => {
+      if (embedUrl) return;
+      const src = $(el).attr("src") ?? "";
+      if (src.startsWith("https://")) embedUrl = src;
+    });
+  }
+
+  // Priority 3: data-src (lazy-loaded iframes)
+  if (!embedUrl) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    $("iframe[data-src]").each((_: number, el: any) => {
+      if (embedUrl) return;
+      const src = $(el).attr("data-src") ?? "";
+      if (src.startsWith("http")) embedUrl = src;
+    });
+  }
+
+  // ── Duration ──────────────────────────────────────────────────────────────
+  const durationRaw =
+    $("meta[property='video:duration']").attr("content") ??
+    $("meta[name='duration']").attr("content") ??
+    "";
+  let durationSeconds = parseInt(durationRaw, 10) || 0;
+  if (!durationSeconds) {
+    const durText = $(
+      ".duration, .video-duration, span.time, .video-time, [class*='duration'], .runtime",
+    )
+      .first()
+      .text()
+      .trim();
+    if (durText) durationSeconds = parseDurationText(durText);
+  }
+
+  // ── Tags ──────────────────────────────────────────────────────────────────
+  const tags: string[] = [];
+  const tagSeen = new Set<string>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  $("a[href*='/category/'], a[href*='/tag/'], a[href*='/categories/']").each((_: number, el: any) => {
+    const href = $(el).attr("href") ?? "";
+    if (
+      href.includes("/pornstar/") || href.includes("/model/") ||
+      href.includes("/actress/")  || href.includes("/studio/")
+    ) return;
+    const t = $(el).text().trim().toLowerCase();
+    if (!t || t.length < 2 || t.length > 40) return;
+    if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
+  });
+
+  // ── Performers ────────────────────────────────────────────────────────────
+  const performers: string[] = [];
+  const perfSeen = new Set<string>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  $("a[href*='/pornstar/'], a[href*='/model/'], a[href*='/models/'], a[href*='/actress/']").each((_: number, el: any) => {
+    const name = $(el).text().trim();
+    if (!name || name.length < 3) return;
+    if (name.split(" ").length > 3 || name.length > 28) return;
+    if (!perfSeen.has(name)) { perfSeen.add(name); performers.push(name); }
+  });
+
+  return { embedUrl, durationSeconds, tags, performers };
+}
+
+/**
+ * Scrape fxpornhd.com for full-length videos — unrestricted (no studio filter).
+ *
+ * Crawls the main paginated listing (`/page/N/`), extracts every video card,
+ * then fetches each detail page to obtain the real iframe embed URL, tags, and
+ * performers.  Uses onConflictDoUpdate so repeat runs refresh view counts.
+ *
+ * @param pagesCount Number of paginated listing pages to crawl (default 3).
+ */
+export async function scrapeFXPornHD(pagesCount = 3): Promise<void> {
+  logger.info({ pagesCount }, "scrapeFXPornHD: starting");
+  process.stdout.write(
+    `\n[FXPORNHD] Starting scrape — up to ${pagesCount} listing pages\n`,
+  );
+
+  const seenSlugs = new Set<string>();
+  let totalSaved  = 0;
+
+  for (let page = 1; page <= pagesCount; page++) {
+    const listUrl = page === 1
+      ? `${FX_BASE}/`
+      : `${FX_BASE}/page/${page}/`;
+
+    const html = await fetchHtmlFrom(listUrl, FX_BASE);
+    if (!html) {
+      process.stdout.write(`[FXPORNHD] Page ${page} — fetch failed, skipping\n`);
+      await delay(FX_DELAY_MS);
+      continue;
+    }
+
+    const $ = cheerio.load(html);
+    const videoLinks: { href: string; title: string; thumb: string; durText: string }[] = [];
+    const linkSeen = new Set<string>();
+
+    // Tier 1 — standard tube-site card selectors
+    const CARD_SELECTORS = [
+      "article.post",
+      ".video-item",
+      ".thumb-item",
+      ".video-block",
+      ".grid-item",
+      "div[class*='video-card']",
+      "div[class*='thumb']",
+      ".item",
+    ];
+
+    for (const cardSel of CARD_SELECTORS) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      $(cardSel).each((_: number, el: any) => {
+        const card   = $(el);
+        const linkEl = card.find("a[href]").first();
+        const href   = linkEl.attr("href") ?? "";
+        if (!href) return;
+        const abs = href.startsWith("http") ? href : `${FX_BASE}${href}`;
+        if (!abs.includes("fxpornhd.com")) return;
+        if (abs === FX_BASE || abs === `${FX_BASE}/`) return;
+        if (abs.includes("/page/") || abs.includes("/category/") || abs.includes("/tag/")) return;
+        if (linkSeen.has(abs)) return;
+
+        const imgEl = card.find("img").first();
+        let thumb   = imgEl.attr("data-src") ?? imgEl.attr("data-original") ?? imgEl.attr("src") ?? "";
+        if (thumb.startsWith("/"))  thumb = `${FX_BASE}${thumb}`;
+        if (thumb.startsWith("//")) thumb = `https:${thumb}`;
+        if (!thumb.startsWith("http")) return;
+
+        const title =
+          card.find(".title, .video-title, h1, h2, h3").first().text().trim() ||
+          imgEl.attr("alt")?.trim() ||
+          linkEl.attr("title")?.trim() ||
+          "";
+        if (!title) return;
+
+        const durText = card.find(".duration, .time, [class*='dur'], .runtime").first().text().trim();
+
+        linkSeen.add(abs);
+        videoLinks.push({ href: abs, title, thumb, durText });
+      });
+      if (videoLinks.length > 0) break;
+    }
+
+    // Tier 2 — broad fallback: any anchor wrapping an <img> on the same domain
+    if (videoLinks.length === 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      $("a[href]").each((_: number, el: any) => {
+        const a    = $(el);
+        const href = a.attr("href") ?? "";
+        if (!href) return;
+        const abs = href.startsWith("http") ? href : `${FX_BASE}${href}`;
+        if (!abs.includes("fxpornhd.com")) return;
+        if (abs === FX_BASE || abs === `${FX_BASE}/`) return;
+        if (abs.includes("/page/") || abs.includes("/category/") || abs.includes("/tag/")) return;
+        if (linkSeen.has(abs)) return;
+
+        const imgEl = a.find("img").first();
+        if (!imgEl.length) return;
+        let thumb = imgEl.attr("data-src") ?? imgEl.attr("src") ?? "";
+        if (thumb.startsWith("/"))  thumb = `${FX_BASE}${thumb}`;
+        if (thumb.startsWith("//")) thumb = `https:${thumb}`;
+        if (!thumb.startsWith("http")) return;
+
+        const title = imgEl.attr("alt")?.trim() || a.attr("title")?.trim() || "";
+        if (!title) return;
+        linkSeen.add(abs);
+        videoLinks.push({ href: abs, title, thumb, durText: "" });
+      });
+    }
+
+    if (videoLinks.length === 0) {
+      process.stdout.write(`[FXPORNHD] Page ${page} — no video cards found\n`);
+      await delay(FX_DELAY_MS);
+      continue;
+    }
+
+    // Build candidate objects from listing data
+    const candidates: ScrapedVideo[] = [];
+    for (const { href, title, thumb, durText } of videoLinks) {
+      const durationSeconds = parseDurationText(durText);
+      if (durationSeconds > 0 && durationSeconds < MIN_DURATION_SECONDS) continue;
+
+      const pathSlug = href
+        .replace(/^https?:\/\/[^/]+/, "")
+        .replace(/^\//, "")
+        .replace(/\/$/, "");
+      const rawSlug = `fx-${slugify(pathSlug || title)}`.slice(0, 120);
+      if (seenSlugs.has(rawSlug)) continue;
+      seenSlugs.add(rawSlug);
+
+      const familyKeyword = detectFamilyKeyword(title, []);
+
+      candidates.push({
+        slug:             rawSlug,
+        title,
+        description:      null,
+        source_url:       href,
+        embed_url:        href,   // overwritten by detail-page iframe below
+        thumbnail_url:    thumb,
+        duration_seconds: durationSeconds,
+        duration_text:    durText,
+        views:            simulateViews(0),
+        likes:            0,
+        quality_label:    (() => {
+          const lc = title.toLowerCase();
+          return (lc.includes("4k") || lc.includes("2160p") ? "4K" : "1080p") as "4K" | "1080p";
+        })(),
+        category:         familyKeyword ? "family" : "general",
+        studio:           null,
+        release_year:     simulateReleaseYear(),
+        tags:             familyKeyword ? [familyKeyword, "taboo"] : [],
+        pornstars:        [],
+        status:           "published",
+        _familyKeyword:   familyKeyword,
+      });
+    }
+
+    logger.info({ page, candidates: candidates.length }, "scrapeFXPornHD: listing page parsed");
+
+    // Dedup — skip slugs already in DB
+    let newCandidates = candidates;
+    try {
+      const existingRows = await db
+        .select({ slug: videosTable.slug })
+        .from(videosTable)
+        .where(inArray(videosTable.slug, candidates.map((v) => v.slug)));
+      const existingSlugs = new Set(existingRows.map((r: { slug: string }) => r.slug));
+      newCandidates = candidates.filter((v) => !existingSlugs.has(v.slug));
+    } catch (dbErr) {
+      logger.warn({ dbErr }, "scrapeFXPornHD: dedup check failed — proceeding with all candidates");
+    }
+
+    let savedThisPage = 0;
+    for (const v of newCandidates) {
+      const detailHtml = await fetchHtmlFrom(v.source_url, FX_BASE);
+      if (!detailHtml) { await delay(FX_DELAY_MS); continue; }
+
+      const {
+        embedUrl,
+        durationSeconds: detailDur,
+        tags:            detailTags,
+        performers,
+      } = extractFXPornHDMeta(detailHtml);
+
+      if (!embedUrl) {
+        logger.warn({ slug: v.slug }, "scrapeFXPornHD: no iframe embed URL found — skipping");
+        await delay(200);
+        continue;
+      }
+
+      // Merge listing tags with detail-page tags
+      const tagSet = new Set<string>(v.tags);
+      for (const t of detailTags) tagSet.add(t);
+
+      const mergedTags = Array.from(tagSet);
+      const titleLc    = v.title.toLowerCase();
+      const has4K      = titleLc.includes("4k") || titleLc.includes("2160p") ||
+        mergedTags.some((t) => t.toLowerCase() === "4k" || t.toLowerCase() === "2160p");
+
+      const enriched: ScrapedVideo = {
+        ...v,
+        embed_url:        embedUrl,
+        duration_seconds: detailDur > 0 ? detailDur : v.duration_seconds,
+        duration_text:    detailDur > 0
+          ? `${Math.floor(detailDur / 60)}m ${detailDur % 60}s`
+          : v.duration_text,
+        tags:          mergedTags,
+        quality_label: has4K ? "4K" : "1080p",
+        pornstars:     dedupePerformerNames(performers),
+        studio:        v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
+      };
+
+      // onConflictDoUpdate so repeat runs refresh view counts
+      await upsertBatchWithViewUpdate([enriched]);
+      savedThisPage++;
+      await delay(400);
+    }
+
+    totalSaved += savedThisPage;
+    process.stdout.write(
+      `[FXPORNHD] Page ${page}/${pagesCount} — +${savedThisPage} saved (${totalSaved} total)\n`,
+    );
+    logger.info({ page, savedThisPage, totalSaved }, "scrapeFXPornHD: page complete");
+    await delay(FX_DELAY_MS);
+  }
+
+  process.stdout.write(`\n[FXPORNHD] ✅ Complete — ${totalSaved} videos saved\n\n`);
+  logger.info({ totalSaved }, "scrapeFXPornHD: complete");
+}
+
+// ---------------------------------------------------------------------------
 // Scraper daemon — two-phase startup seed (no interval; interval lives in index.ts)
 // ---------------------------------------------------------------------------
 

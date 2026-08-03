@@ -12,6 +12,7 @@ import {
   scrapeByPerformers,
   seedWhitelistedPerformers,
   scrapeGalaxyPorn,
+  scrapeFXPornHD,
   dedupePerformerNames,
   extractPerformersFromGpTitle,
 } from "./lib/scraper";
@@ -696,11 +697,12 @@ app.listen(port, (err?: Error) => {
             startBackupInterval();
 
             process.stdout.write(
-              `\n🚀 BACKFILL: Launching studios · keywords · performers · GalaxyPorn concurrently\n` +
+              `\n🚀 BACKFILL: Launching studios · keywords · performers · GalaxyPorn · FXPornHD concurrently\n` +
               `   Studios: 28 whitelisted · 5 pages each\n` +
               `   Keywords: ${EMPTY_CATEGORY_KEYWORDS.length} terms · 5 pages each\n` +
               `   Performers: 33 stars · UNLIMITED pages\n` +
               `   GalaxyPorn: ${EXPANDED_TABOO_QUERIES.length} taboo queries · 3 pages each · all concurrent\n` +
+              `   FXPornHD: unrestricted · 3 pages\n` +
               `   isScraping=true — heartbeat armed, container kept alive\n\n`,
             );
 
@@ -711,6 +713,7 @@ app.listen(port, (err?: Error) => {
               scrapeByKeywords(EMPTY_CATEGORY_KEYWORDS, 5),
               scrapeByPerformers(),
               ...EXPANDED_TABOO_QUERIES.map((q) => scrapeGalaxyPorn(3, [q])),
+              scrapeFXPornHD(3),
             ])
               .then(() => seedWhitelistedPerformers())
               .then(() => {
@@ -732,10 +735,11 @@ app.listen(port, (err?: Error) => {
         // Autopilot interval is armed immediately after DB check — it runs every
         // 4 hours and does not need to wait for the initial backfill to finish.
         setInterval(() => {
-          logger.info("Autopilot: triggering scheduled scrapeLatest + GalaxyPorn");
+          logger.info("Autopilot: triggering scheduled scrapeLatest + GalaxyPorn + FXPornHD");
           Promise.all([
             scrapeLatest(3),
             ...EXPANDED_TABOO_QUERIES.map((q) => scrapeGalaxyPorn(3, [q])),
+            scrapeFXPornHD(3),
           ])
             .then(() => seedWhitelistedPerformers())
             .catch((err: unknown) => logger.error({ err }, "Autopilot multi-source scrape failed"));
@@ -743,7 +747,7 @@ app.listen(port, (err?: Error) => {
 
         logger.info(
           { intervalHours: AUTOPILOT_INTERVAL_MS / 3_600_000 },
-          "Autopilot Scheduler armed — HQporner + GalaxyPorn will fire every 4 hours",
+          "Autopilot Scheduler armed — HQporner + GalaxyPorn + FXPornHD will fire every 4 hours",
         );
       })
       .catch((err: unknown) => {
