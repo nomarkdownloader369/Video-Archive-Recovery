@@ -235,19 +235,57 @@ async function fetchHtmlFrom(url: string, referer: string): Promise<string | nul
  * Returns an empty array if the title doesn't match the expected format.
  */
 export function extractPerformersFromGpTitle(title: string): string[] {
-  // Capture everything between the closing ] and the subtitle separator.
-  // Accepts – (U+2013), — (U+2014), or a spaced ASCII hyphen " - ".
+  // Helper: from a text segment, collect the first 2 consecutive Title-Case words
+  // as a single performer name.  Stops at the first word that doesn't begin with
+  // an uppercase letter (e.g. "Rewardingly", "Stepdads", "for" all break the run).
+  const extractName = (segment: string): string | null => {
+    const words = segment.trim().split(/\s+/);
+    const nameWords: string[] = [];
+    for (const w of words) {
+      const clean = w.replace(/[^a-zA-Z''-]/g, "");
+      if (clean.length >= 2 && /^[A-Z]/.test(clean)) {
+        nameWords.push(clean);
+        if (nameWords.length === 2) break;
+      } else {
+        break;
+      }
+    }
+    if (nameWords.length < 2) return null;
+    const name = nameWords.join(" ");
+    return name.length >= 4 && name.length <= 28 ? name : null;
+  };
+
+  // Pattern 1 & 2: em-dash separator present — existing reliable format
+  // "[...] Name1, Name2 – Video Title"  or  "Studio YY MM DD Name1 – Video Title"
   let match = title.match(/\]\s*([^–—]+?)\s*(?:–|—)/);
   if (!match) {
-    // Non-bracket format: "Studio YY MM DD Name1[,&]Name2 – Video Title"
     match = title.match(/^[\w]+(?:\s+\d{2}){3}\s+(.+?)\s*(?:–|—)/);
   }
-  if (!match) return [];
-  // Split on comma or ampersand, require ≥ 4 chars to filter out "Ali", "Ivo", etc.
-  return match[1]
-    .split(/[,&]/)
-    .map((n) => n.trim())
-    .filter((n) => n.length >= 4);
+  if (match) {
+    return match[1]
+      .split(/[,&]/)
+      .map((n) => n.trim())
+      .filter((n) => n.length >= 4 && n.split(" ").length <= 3 && n.length <= 28);
+  }
+
+  // Pattern 3: no em-dash — "Studio YY MM DD Name1[, Name2] Title [ 1080p]"
+  // Strip the leading "Studio YY MM DD " to isolate the performer+title portion.
+  const afterDate = title.replace(/^[\w]+\s+\d{2}\s+\d{2}\s+\d{2}\s+/, "");
+  if (!afterDate || afterDate === title) return [];
+
+  // If a comma or ampersand appears in the first 80 characters, treat them as
+  // multiple-performer separators (e.g. "Julia James, Laynee James Sari...").
+  if (/[,&]/.test(afterDate.slice(0, 80))) {
+    const segments = afterDate.slice(0, 80).split(/[,&]/);
+    const names = segments
+      .map(extractName)
+      .filter((n): n is string => n !== null);
+    if (names.length > 0) return names;
+  }
+
+  // Single performer: take the first 2 Title-Case words after the date.
+  const name = extractName(afterDate);
+  return name ? [name] : [];
 }
 
 export function dedupePerformerNames(names: string[]): string[] {
