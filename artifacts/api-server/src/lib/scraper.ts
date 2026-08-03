@@ -2082,7 +2082,7 @@ function extractFXPornHDMeta(html: string): {
   const performers: string[] = [];
   const perfSeen = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $("a[href*='/pornstar/'], a[href*='/model/'], a[href*='/models/'], a[href*='/actress/']").each((_: number, el: any) => {
+  $("a[href*='/pornstar/'], a[href*='/model/'], a[href*='/models/'], a[href*='/actress/'], a[href*='/star/']").each((_: number, el: any) => {
     const name = $(el).text().trim();
     if (!name || name.length < 3) return;
     if (name.split(" ").length > 3 || name.length > 28) return;
@@ -2107,6 +2107,23 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
   process.stdout.write(
     `\n[FXPORNHD] Starting deep backfill — crawling up to ${maxPages} pages (stops early on empty page)\n`,
   );
+
+  // Load the full DB performer pool once — used for title-based name matching
+  // on every video where the detail page has no explicit performer links.
+  let fxPerformerPool: string[] = [];
+  try {
+    const rows = await db.execute(sql`
+      SELECT DISTINCT unnest(${videosTable.pornstars}) AS name
+      FROM ${videosTable}
+      WHERE ${videosTable.status} = 'published' AND ${videosTable.pornstars} IS NOT NULL
+    `);
+    fxPerformerPool = (rows.rows as Array<Record<string, unknown>>)
+      .map((r) => r["name"] as string)
+      .filter((n) => Boolean(n) && n.trim().length >= 3);
+    logger.info({ count: fxPerformerPool.length }, "scrapeFXPornHD: performer pool loaded for title fallback");
+  } catch (poolErr) {
+    logger.warn({ poolErr }, "scrapeFXPornHD: could not load performer pool — title fallback disabled");
+  }
 
   const seenSlugs = new Set<string>();
   let totalSaved  = 0;
@@ -2300,6 +2317,26 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         pornstars:     dedupePerformerNames(performers),
         studio:        v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
       };
+
+      // Title fallback — scan against the DB performer pool for names the
+      // detail page didn't expose via anchor links (e.g. title-only credits).
+      if (fxPerformerPool.length > 0) {
+        const titleLowerFx = enriched.title.toLowerCase();
+        const perfSetFx    = new Set<string>(enriched.pornstars.map((p: string) => p.toLowerCase()));
+        for (const name of fxPerformerPool) {
+          if (perfSetFx.has(name.toLowerCase())) continue;
+          const nameLower  = name.trim().toLowerCase();
+          const nameWords  = nameLower.split(/\s+/);
+          const escaped    = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const inTitle    = nameWords.length === 1
+            ? new RegExp(`\\b${escaped}\\b`).test(titleLowerFx)
+            : titleLowerFx.includes(nameLower);
+          if (inTitle) {
+            enriched.pornstars = dedupePerformerNames([...enriched.pornstars, name]);
+            perfSetFx.add(name.toLowerCase());
+          }
+        }
+      }
 
       // onConflictDoUpdate so repeat runs refresh view counts
       await upsertBatchWithViewUpdate([enriched]);
