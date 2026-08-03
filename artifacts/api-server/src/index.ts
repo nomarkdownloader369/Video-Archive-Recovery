@@ -312,6 +312,66 @@ async function autoPerformerSanityCleanup(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// purgeFakePerformers — remove garbage entries injected by title heuristics
+// ---------------------------------------------------------------------------
+
+async function purgeFakePerformers(): Promise<void> {
+  const start = Date.now();
+
+  // Words that should never appear inside a real performer name.
+  // Any pornstars entry whose words include one of these is synthetic garbage.
+  const FAKE_WORDS = new Set([
+    "his", "is", "to", "fuck", "what", "your", "cock", "cures", "phase",
+    "you", "don", "emo", "alert", "risk", "newcomer", "goddess", "hottie",
+    "delivery", "teach", "me", "her", "the", "and", "for", "with", "gets",
+    "takes", "makes", "turns", "comes", "goes", "wants", "needs", "loves",
+    "fucks", "high", "falling", "love", "routine", "hungry", "busty",
+    "petite", "thick", "slim", "nasty", "horny", "naughty", "dirty",
+  ]);
+
+  const videos = await db
+    .select({ id: videosTable.id, pornstars: videosTable.pornstars })
+    .from(videosTable);
+
+  let removedCount = 0;
+  const updates: Array<{ id: number; pornstars: string[] }> = [];
+
+  for (const video of videos) {
+    if (!video.pornstars || video.pornstars.length === 0) continue;
+
+    const cleaned = (video.pornstars as string[]).filter((name) => {
+      const words = name.trim().split(/\s+/);
+      if (words.length > 3) return false;                                     // >3 words → not a real name
+      if (words.some((w) => FAKE_WORDS.has(w.toLowerCase()))) return false;  // contains a banned word
+      return true;
+    });
+
+    const removed = video.pornstars.length - cleaned.length;
+    if (removed === 0) continue;
+    removedCount += removed;
+    updates.push({ id: video.id, pornstars: cleaned });
+  }
+
+  const CONCURRENCY = 50;
+  for (let i = 0; i < updates.length; i += CONCURRENCY) {
+    await Promise.all(
+      updates.slice(i, i + CONCURRENCY).map(({ id, pornstars }) =>
+        db.update(videosTable).set({ pornstars }).where(eq(videosTable.id, id)),
+      ),
+    );
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  process.stdout.write(
+    `\n🛠️ [PURGE] Removed ${removedCount} fake performer entries from ${updates.length} videos in ${elapsed}s\n\n`,
+  );
+  logger.info(
+    { removedCount, videosScanned: videos.length, rowsUpdated: updates.length, elapsedSeconds: elapsed },
+    "purgeFakePerformers: complete",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // autoQualityRepair — fix incorrect quality_label on GalaxyPorn rows
 // ---------------------------------------------------------------------------
 
@@ -701,8 +761,9 @@ app.listen(port, (err?: Error) => {
         autoPerformerRepair()
           .then(() => autoPerformerCleanup())
           .then(() => autoPerformerSanityCleanup())
+          .then(() => purgeFakePerformers())
           .catch((err: unknown) =>
-            logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup failed"),
+            logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup/purgeFake failed"),
           );
         autoQualityRepair().catch((err: unknown) =>
           logger.error({ err }, "autoQualityRepair failed"),
