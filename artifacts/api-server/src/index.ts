@@ -20,6 +20,15 @@ import {
 const EMPTY_CATEGORY_KEYWORDS = [
   "bbc", "bbw", "college", "uniform", "onlyfans", "erotic", "footjob",
 ];
+
+// 24 family/taboo studio keywords for GalaxyPorn backfill — run concurrently, 3 pages each.
+const EXPANDED_TABOO_QUERIES = [
+  "Pure Taboo", "MissaX", "Family Strokes", "BrattySis", "Stepmom", "Stepsister",
+  "Incest", "Step Family", "Dad Crush", "Daughter Swap", "My Pervy Family",
+  "Family Therapy", "Moms Teach Sex", "Bratty MILF", "Step Siblings", "Mom Swap",
+  "Aunt Swap", "Household Fantasy", "Stepdaughter", "Stepdad", "PervMom", "BFFS",
+  "Sister Swap", "Submissive",
+];
 import type { Request, Response } from "express";
 import type { InsertVideo } from "@workspace/db";
 
@@ -644,7 +653,7 @@ app.listen(port, (err?: Error) => {
               `   Studios: 28 whitelisted · 5 pages each\n` +
               `   Keywords: ${EMPTY_CATEGORY_KEYWORDS.length} terms · 5 pages each\n` +
               `   Performers: 33 stars · UNLIMITED pages\n` +
-              `   GalaxyPorn: Taboo + Missax · 3 pages each\n` +
+              `   GalaxyPorn: ${EXPANDED_TABOO_QUERIES.length} taboo queries · 3 pages each · all concurrent\n` +
               `   isScraping=true — heartbeat armed, container kept alive\n\n`,
             );
 
@@ -654,7 +663,7 @@ app.listen(port, (err?: Error) => {
               scrapeByStudios(5),
               scrapeByKeywords(EMPTY_CATEGORY_KEYWORDS, 5),
               scrapeByPerformers(),
-              scrapeGalaxyPorn(3),
+              ...EXPANDED_TABOO_QUERIES.map((q) => scrapeGalaxyPorn(3, [q])),
             ])
               .then(() => seedWhitelistedPerformers())
               .then(() => {
@@ -679,7 +688,7 @@ app.listen(port, (err?: Error) => {
           logger.info("Autopilot: triggering scheduled scrapeLatest + GalaxyPorn");
           Promise.all([
             scrapeLatest(3),
-            scrapeGalaxyPorn(3),
+            ...EXPANDED_TABOO_QUERIES.map((q) => scrapeGalaxyPorn(3, [q])),
           ])
             .then(() => seedWhitelistedPerformers())
             .catch((err: unknown) => logger.error({ err }, "Autopilot multi-source scrape failed"));

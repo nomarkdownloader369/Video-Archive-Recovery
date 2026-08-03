@@ -1648,16 +1648,16 @@ function extractGalaxyPornMeta(html: string): {
  *
  * @param pagesCount Listing pages to crawl per search term (default 3).
  */
-export async function scrapeGalaxyPorn(pagesCount = 3): Promise<void> {
-  logger.info({ pagesCount, searches: GP_SEARCHES }, "scrapeGalaxyPorn: starting");
+export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SEARCHES): Promise<void> {
+  logger.info({ pagesCount, searches: queries }, "scrapeGalaxyPorn: starting");
   process.stdout.write(
-    `\n[GALAXYPORN] Starting scrape — up to ${pagesCount} pages × ${GP_SEARCHES.length} search terms\n`,
+    `\n[GALAXYPORN] Starting scrape — up to ${pagesCount} pages × ${queries.length} search terms\n`,
   );
 
   const seenSlugs = new Set<string>();
   let totalSaved  = 0;
 
-  for (const query of GP_SEARCHES) {
+  for (const query of queries) {
     process.stdout.write(`[GALAXYPORN] ── Search: "${query}"\n`);
 
     for (let page = 1; page <= pagesCount; page++) {
