@@ -1988,7 +1988,7 @@ const FX_DELAY_MS = 600;
  *  - tags       — links under /category/ or /tag/
  *  - performers — links under /pornstar/, /model/, /models/, or /actress/
  */
-function extractFXPornHDMeta(html: string): {
+function extractFXPornHDMeta(html: string, title = ""): {
   embedUrl: string;
   durationSeconds: number;
   tags: string[];
@@ -2077,6 +2077,39 @@ function extractFXPornHDMeta(html: string): {
     if (FX_TAG_BLOCKLIST.has(t)) return;
     if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
   });
+
+  // ── Title-to-category fallback ────────────────────────────────────────────
+  // When the page yields no useful tags, derive them from the video title so
+  // every video ends up in a real category rather than falling through to
+  // "general". Also strips stray "#tags" / "general" placeholders.
+  const usableTags = tags.filter((t) => t !== "general" && t !== "#tags");
+  if (usableTags.length === 0 && title) {
+    const hasKw = (kw: string) =>
+      new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(title);
+    const TITLE_CLASSIFIERS: Array<{ test: () => boolean; add: string[] }> = [
+      { test: () => hasKw("stepmom") || hasKw("stepmother"), add: ["stepmom", "family", "taboo"] },
+      { test: () => hasKw("threesome") || hasKw("triad"),    add: ["threesome", "erotic"]        },
+      { test: () => hasKw("curvy") || hasKw("bbw"),          add: ["bbw", "curvy"]               },
+      { test: () => hasKw("milf") || hasKw("mom"),           add: ["milf", "mature"]             },
+      { test: () => hasKw("college") || hasKw("student"),    add: ["college"]                    },
+      { test: () => hasKw("ebony"),                          add: ["ebony"]                      },
+      { test: () => hasKw("japanese") || hasKw("asian"),     add: ["japanese"]                   },
+      { test: () => hasKw("onlyfans"),                       add: ["onlyfans"]                   },
+      { test: () => hasKw("anal"),                           add: ["anal"]                       },
+    ];
+    for (const { test, add } of TITLE_CLASSIFIERS) {
+      if (test()) {
+        for (const t of add) {
+          if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
+        }
+      }
+    }
+  } else {
+    // Replace any stale "general" / "#tags" placeholders with real tags
+    for (let i = tags.length - 1; i >= 0; i--) {
+      if (tags[i] === "general" || tags[i] === "#tags") tags.splice(i, 1);
+    }
+  }
 
   // ── Performers ────────────────────────────────────────────────────────────
   const performers: string[] = [];
@@ -2288,7 +2321,7 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         durationSeconds: detailDur,
         tags:            detailTags,
         performers,
-      } = extractFXPornHDMeta(detailHtml);
+      } = extractFXPornHDMeta(detailHtml, v.title);
 
       if (!embedUrl) {
         logger.warn({ slug: v.slug }, "scrapeFXPornHD: no iframe embed URL found — skipping");
@@ -2318,17 +2351,18 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         studio:        v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
       };
 
-      // Title fallback — scan against the DB performer pool for names the
-      // detail page didn't expose via anchor links (e.g. title-only credits).
+      // ── Performer enrichment: DB pool scan + dynamic TitleCase discovery ──
+      const titleLowerFx = enriched.title.toLowerCase();
+      const perfSetFx    = new Set<string>(enriched.pornstars.map((p: string) => p.toLowerCase()));
+
+      // Pass 1 — match known DB performer names against the video title
       if (fxPerformerPool.length > 0) {
-        const titleLowerFx = enriched.title.toLowerCase();
-        const perfSetFx    = new Set<string>(enriched.pornstars.map((p: string) => p.toLowerCase()));
         for (const name of fxPerformerPool) {
           if (perfSetFx.has(name.toLowerCase())) continue;
-          const nameLower  = name.trim().toLowerCase();
-          const nameWords  = nameLower.split(/\s+/);
-          const escaped    = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const inTitle    = nameWords.length === 1
+          const nameLower = name.trim().toLowerCase();
+          const nameWords = nameLower.split(/\s+/);
+          const escaped   = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const inTitle   = nameWords.length === 1
             ? new RegExp(`\\b${escaped}\\b`).test(titleLowerFx)
             : titleLowerFx.includes(nameLower);
           if (inTitle) {
@@ -2336,6 +2370,25 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
             perfSetFx.add(name.toLowerCase());
           }
         }
+      }
+
+      // Pass 2 — dynamic auto-discovery: extract 2–3 word TitleCase patterns
+      // (e.g. "Cherry Kiss", "Luna Angel") not already in the performer set.
+      const CAPS_NAME_BLOCKLIST = new Set([
+        "Watch", "Full", "Video", "Free", "Download", "Online", "Stream", "Scene",
+        "The", "And", "For", "New", "Hot", "Big", "Best", "Real", "Teen",
+        "Hard", "Deep", "From", "More", "Only", "Just", "Very", "With", "This",
+        "Gets", "Gets", "Takes", "Makes", "Wants", "Needs", "Loves", "Fucks",
+      ]);
+      for (const match of enriched.title.matchAll(/\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){1,2})\b/g)) {
+        const candidate = match[1].trim();
+        const words     = candidate.split(" ");
+        if (words.length < 2 || words.length > 3) continue;
+        if (words.some((w) => CAPS_NAME_BLOCKLIST.has(w))) continue;
+        if (candidate.length > 28) continue;
+        if (perfSetFx.has(candidate.toLowerCase())) continue;
+        enriched.pornstars = dedupePerformerNames([...enriched.pornstars, candidate]);
+        perfSetFx.add(candidate.toLowerCase());
       }
 
       // onConflictDoUpdate so repeat runs refresh view counts
