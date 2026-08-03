@@ -2059,8 +2059,9 @@ function extractFXPornHDMeta(html: string, title = ""): {
   // fxpornhd.com renders categories/tags as flat anchor buttons — scrape all
   // three href patterns comprehensively, then filter noise words.
   const FX_TAG_BLOCKLIST = new Set([
-    "categories", "fxpornhd", "hd porn", "porn", "free porn", "sex", "video",
-    "videos", "xxx", "adult", "tube", "watch", "online", "free", "full",
+    "categories", "#categories", "tags", "#tags", "fxpornhd", "hd porn",
+    "porn", "free porn", "sex", "video", "videos", "xxx", "adult", "tube",
+    "watch", "online", "free", "full", "general",
   ]);
   const tags: string[] = [];
   const tagSeen = new Set<string>();
@@ -2372,23 +2373,61 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         }
       }
 
-      // Pass 2 — dynamic auto-discovery: extract 2–3 word TitleCase patterns
-      // (e.g. "Cherry Kiss", "Luna Angel") not already in the performer set.
-      const CAPS_NAME_BLOCKLIST = new Set([
-        "Watch", "Full", "Video", "Free", "Download", "Online", "Stream", "Scene",
-        "The", "And", "For", "New", "Hot", "Big", "Best", "Real", "Teen",
-        "Hard", "Deep", "From", "More", "Only", "Just", "Very", "With", "This",
-        "Gets", "Gets", "Takes", "Makes", "Wants", "Needs", "Loves", "Fucks",
+      // Pass 2 — structured title performer extraction.
+      // FXPornHD titles follow predictable patterns:
+      //   "[Studio] Performer Name – Episode Title"
+      //   "...With/feat./starring Performer Name"
+      // The broad TitleCase regex produced too many false positives (e.g.
+      // "Newcomer Alert", "High Risk", "Cock Hungry Hottie"), so we now only
+      // extract names from structurally trusted positions in the title.
+      const TITLE_NON_NAME_WORDS = new Set([
+        "alert", "newcomer", "high", "risk", "falling", "love", "watch", "scene",
+        "episode", "vol", "part", "chapter", "bonus", "extra", "big", "hot",
+        "sexy", "first", "last", "best", "real", "hard", "deep", "full", "free",
+        "new", "top", "old", "raw", "wet", "cock", "pussy", "ass", "tit", "dick",
+        "cum", "sex", "fuck", "routine", "delivery", "phase", "emo", "hungry",
+        "cures", "turns", "comes", "goes", "his", "her", "the", "and", "for",
+        "gets", "takes", "makes", "wants", "needs", "loves", "fucks", "more",
+        "goddess", "princess", "queen", "babe", "slut", "hottie", "cutie",
+        "naughty", "horny", "dirty", "nasty", "stepmom", "stepsis", "stepbro",
+        "stepdad", "cougar", "milf", "teen", "amateur", "homemade", "compilation",
+        "only", "just", "very", "with", "this", "from", "into", "onto", "after",
+        "before", "during", "inside", "outside", "behind", "again", "while",
+        "alert", "midget", "rough", "young", "older", "thick", "slim", "tiny",
+        "busty", "petite", "blonde", "brunette", "redhead", "tattooed", "pierced",
       ]);
-      for (const match of enriched.title.matchAll(/\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){1,2})\b/g)) {
-        const candidate = match[1].trim();
-        const words     = candidate.split(" ");
-        if (words.length < 2 || words.length > 3) continue;
-        if (words.some((w) => CAPS_NAME_BLOCKLIST.has(w))) continue;
-        if (candidate.length > 28) continue;
-        if (perfSetFx.has(candidate.toLowerCase())) continue;
-        enriched.pornstars = dedupePerformerNames([...enriched.pornstars, candidate]);
-        perfSetFx.add(candidate.toLowerCase());
+
+      const isPlausiblePerformerName = (name: string): boolean => {
+        const words = name.trim().split(/\s+/);
+        if (words.length < 2 || words.length > 3) return false;
+        if (name.length > 28) return false;
+        // Every word must be TitleCase letters only (no digits, no punctuation)
+        if (!words.every((w) => /^[A-Z][a-z]{1,}$/.test(w))) return false;
+        if (words.some((w) => TITLE_NON_NAME_WORDS.has(w.toLowerCase()))) return false;
+        return true;
+      };
+
+      // Pattern A: "[Studio] Performer Name – Episode Title" (em-dash separator)
+      const dashSegment = enriched.title.match(/^\[[^\]]+\]\s*(.*?)\s*(?:–|—|\u2013|\u2014)/);
+      if (dashSegment) {
+        const segment = dashSegment[1].trim();
+        // May be comma/ampersand-separated for multi-performer scenes
+        for (const part of segment.split(/[,&]+/).map((s) => s.trim())) {
+          if (isPlausiblePerformerName(part) && !perfSetFx.has(part.toLowerCase())) {
+            enriched.pornstars = dedupePerformerNames([...enriched.pornstars, part]);
+            perfSetFx.add(part.toLowerCase());
+          }
+        }
+      }
+
+      // Pattern B: "With/feat./ft./starring Performer Name" anywhere in title
+      const WITH_RE = /\b(?:with|feat\.?|ft\.?|starring)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/gi;
+      for (const m of enriched.title.matchAll(WITH_RE)) {
+        const candidate = m[1].trim();
+        if (isPlausiblePerformerName(candidate) && !perfSetFx.has(candidate.toLowerCase())) {
+          enriched.pornstars = dedupePerformerNames([...enriched.pornstars, candidate]);
+          perfSetFx.add(candidate.toLowerCase());
+        }
       }
 
       // onConflictDoUpdate so repeat runs refresh view counts
