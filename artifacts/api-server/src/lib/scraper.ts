@@ -2094,6 +2094,32 @@ const FX_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: string[] 
   // ── POV ───────────────────────────────────────────────────────────────────
   povmaster:            { categories: ["erotic"],     tags: ["pov", "erotic"] },
   povlife:              { categories: ["erotic"],     tags: ["pov", "erotic", "amateur"] },
+
+  // ── Brazzers correct lowercase key (brazzersExxtra key above is broken) ──
+  brazzersexxtra:       { categories: ["erotic"],     tags: ["hd", "erotic", "big boobs"] },
+
+  // ── Step-family / Taboo (additional studios) ─────────────────────────────
+  missax:               { categories: ["taboo"],      tags: ["taboo", "family", "erotic"] },
+  mysistershotfriend:   { categories: ["taboo"],      tags: ["taboo", "stepsis", "friend"] },
+  neighboraffair:       { categories: ["erotic"],     tags: ["erotic", "milf", "cheating"] },
+  fillupmymom:          { categories: ["milf"],       tags: ["milf", "stepmom", "creampie"] },
+  hijabmylfs:           { categories: ["milf"],       tags: ["milf", "hijab", "mature", "taboo"] },
+
+  // ── Teen / Young ──────────────────────────────────────────────────────────
+  princesscum:          { categories: ["erotic"],     tags: ["erotic", "teen", "hd"] },
+  newsensations:        { categories: ["erotic"],     tags: ["erotic", "hd", "big boobs"] },
+  oyeloca:              { categories: ["erotic"],     tags: ["erotic", "latina", "amateur"] },
+
+  // ── Big Boobs / Creampie ──────────────────────────────────────────────────
+  bigtitcreampie:       { categories: ["erotic"],     tags: ["big boobs", "creampie", "erotic"] },
+
+  // ── Alternative / Euro ────────────────────────────────────────────────────
+  femalefaketaxi:       { categories: ["erotic"],     tags: ["erotic", "pov", "euro", "fake taxi"] },
+
+  // ── Network / Premium ─────────────────────────────────────────────────────
+  rkprime:              { categories: ["erotic"],     tags: ["erotic", "hd", "amateur"] },
+  onlyfans:             { categories: ["onlyfans"],   tags: ["onlyfans", "amateur", "hd"] },
+  onlytarts:            { categories: ["erotic"],     tags: ["erotic", "hd"] },
 };
 
 /**
@@ -2226,19 +2252,50 @@ function extractFXPornHDMeta(html: string, title = ""): {
   const tags: string[] = [];
   const tagSeen = new Set<string>();
 
-  // Step 1 — HTML anchor tags (/tag/, /tags/, /category/)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $("a[href*='/tag/'], a[href*='/tags/'], a[href*='/category/']").each((_: number, el: any) => {
-    const href = $(el).attr("href") ?? "";
-    if (
-      href.includes("/pornstar/") || href.includes("/model/") ||
-      href.includes("/actress/")  || href.includes("/studio/")
-    ) return;
-    const t = $(el).text().trim().toLowerCase().replace(/^#/, "");
-    if (!t || t.length < 2 || t.length > 40) return;
-    if (FX_TAG_BLOCKLIST.has(t)) return;
-    if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
-  });
+  // Step 1 — fxpornhd.com uses a .tags-list container whose links have:
+  //   • Category hrefs: /big-ass/  /taboo/  (direct slug — NO /category/ prefix)
+  //   • Tag hrefs:      /s/big-tits/  /s/blowjobs/  (/s/ prefix)
+  //   • Performer hrefs: /actor/river-lynn/  (skip — handled separately)
+  //   • Year hrefs:      /s/2026/  (skip — pure year strings are noise)
+  // Neither /tag/ nor /category/ ever appears in their URL structure, so the
+  // classic tube-site selector finds zero matches.  Use .tags-list directly.
+  const tagsListAnchors = $(".tags-list a[href]");
+  if (tagsListAnchors.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tagsListAnchors.each((_: number, el: any) => {
+      const href = $(el).attr("href") ?? "";
+      // Skip performer links
+      if (
+        href.includes("/actor/")   || href.includes("/actress/") ||
+        href.includes("/pornstar/")|| href.includes("/model/")
+      ) return;
+      // Skip year-only slugs like /s/2026/
+      const lastSegment = href.replace(/\/$/, "").split("/").pop() ?? "";
+      if (/^\d{4}(-\d+)?$/.test(lastSegment)) return;
+      // Prefer the title attribute (clean display text) over inner text
+      const raw = ($(el).attr("title") ?? $(el).text()).trim().toLowerCase().replace(/^#/, "");
+      if (!raw || raw.length < 2 || raw.length > 40) return;
+      if (FX_TAG_BLOCKLIST.has(raw)) return;
+      if (!tagSeen.has(raw)) { tagSeen.add(raw); tags.push(raw); }
+    });
+  }
+
+  // Step 1b — Fallback for other tube sites that DO use /tag/, /tags/, /category/
+  if (tags.length === 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    $("a[href*='/tag/'], a[href*='/tags/'], a[href*='/category/']").each((_: number, el: any) => {
+      const href = $(el).attr("href") ?? "";
+      if (
+        href.includes("/pornstar/") || href.includes("/model/") ||
+        href.includes("/actress/")  || href.includes("/actor/") ||
+        href.includes("/studio/")
+      ) return;
+      const t = $(el).text().trim().toLowerCase().replace(/^#/, "");
+      if (!t || t.length < 2 || t.length > 40) return;
+      if (FX_TAG_BLOCKLIST.has(t)) return;
+      if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
+    });
+  }
 
   // Step 2 — Bracketed studio → full taxonomy injection (FX_STUDIO_TAXONOMY).
   // Titles follow "[StudioName] ..." — normalise the prefix, look up the taxonomy,
@@ -2295,20 +2352,44 @@ function extractFXPornHDMeta(html: string, title = ""): {
   }
 
   // ── Performers ────────────────────────────────────────────────────────────
-  // STRICT RULE: HTML links only — no title heuristics, no hyphen-splitting,
-  // no comma-parsing, no word-list matching against the raw title string.
-  // Only <a href> anchors pointing to pornstar/model/actress/star paths are
-  // accepted. The DB-pool enrichment pass in scrapeFXPornHD() may add names
-  // afterward, but only via exact multi-word matching (2+ words required).
+  // Primary: HTML anchor links pointing to performer profile paths.
+  // fxpornhd.com uses /actor/ — also handles /pornstar/, /model/, /actress/,
+  // /star/ for other tube sites.
+  // Fallback: parse the "[Studio] Performer1, Performer2 – Scene Title" title
+  // pattern that fxpornhd.com uses consistently when no HTML links are found.
   const performers: string[] = [];
   const perfSeen = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $("a[href*='/pornstar/'], a[href*='/model/'], a[href*='/models/'], a[href*='/actress/'], a[href*='/star/']").each((_: number, el: any) => {
-    const name = $(el).text().trim();
+  $("a[href*='/actor/'], a[href*='/pornstar/'], a[href*='/model/'], a[href*='/models/'], a[href*='/actress/'], a[href*='/star/']").each((_: number, el: any) => {
+    const name = $(el).attr("title")?.trim() || $(el).text().trim();
     if (!name || name.length < 3) return;
     if (name.split(" ").length > 3 || name.length > 28) return;
     if (!perfSeen.has(name)) { perfSeen.add(name); performers.push(name); }
   });
+
+  // Fallback: parse "[Studio] Performer1, Performer2 – Scene Title"
+  // fxpornhd.com titles reliably follow this format.  Only runs when HTML
+  // links found zero performers so we never double-count.
+  if (performers.length === 0 && title) {
+    // Match the segment between "]" and the scene-title separator (– / — / " - ")
+    const m = title.match(/^\[[^\]]+\]\s*(.+?)(?:\s*[–—]\s*|\s{1,3}-{1,2}\s{1,3})/);
+    if (m) {
+      const namesPart = m[1].trim();
+      // Split on ", " or " & " — don't split on plain " " so "First Last" stays whole
+      const candidates = namesPart.split(/\s*,\s*|\s+&\s+/);
+      for (const raw of candidates) {
+        const name = raw.trim();
+        if (!name || name.length < 3 || name.length > 30) continue;
+        const words = name.split(/\s+/);
+        if (words.length < 1 || words.length > 3) continue;
+        // Must start with a capital letter (TitleCase first name — rejects random lower-case phrases)
+        if (!/^[A-Z]/.test(name)) continue;
+        // Reject if it looks like a scene descriptor rather than a name
+        if (/\b(the|my|her|his|your|our|a|an|in|on|at|of|for|to|with|is|are|was)\b/i.test(name)) continue;
+        if (!perfSeen.has(name)) { perfSeen.add(name); performers.push(name); }
+      }
+    }
+  }
 
   return { embedUrl, durationSeconds, tags, performers };
 }
