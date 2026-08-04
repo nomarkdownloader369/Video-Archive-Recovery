@@ -826,7 +826,6 @@ app.listen(port, (err?: Error) => {
             scrapeFXPornHD(3),
           ])
             .then(() => seedWhitelistedPerformers())
-            .then(() => purgeFakePerformers())
             .catch((err: unknown) => logger.error({ err }, "Autopilot multi-source scrape failed"));
         }, AUTOPILOT_INTERVAL_MS);
 

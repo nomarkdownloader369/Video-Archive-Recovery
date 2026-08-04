@@ -197,32 +197,6 @@ export function VideoCard({ video }: { video: Video }) {
             ))}
           </div>
         )}
-
-        {/* Category + tag chips — muted slate, non-clickable metadata */}
-        {(() => {
-          const cat = (video.category ?? "").toLowerCase().trim();
-          const catDisplay = cat && cat !== "general" ? cat : null;
-          const tagBlocklist = new Set(["general", "hd porn", "porn", "free porn", "sex", "xxx", "adult", "tube", "free", "full", cat]);
-          const tagChips = (video.tags ?? [])
-            .map(t => t.toLowerCase().trim())
-            .filter(t => t.length >= 2 && !tagBlocklist.has(t) && t !== catDisplay)
-            .slice(0, 2);
-          if (!catDisplay && tagChips.length === 0) return null;
-          return (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {catDisplay && (
-                <span className="rounded-[3px] bg-zinc-800 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-300">
-                  {catDisplay}
-                </span>
-              )}
-              {tagChips.map(tag => (
-                <span key={tag} className="rounded-[3px] bg-zinc-800/70 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-                  {tag}
-                </span>
-              ))}
-            </div>
-          );
-        })()}
       </div>
     </div>
   );
