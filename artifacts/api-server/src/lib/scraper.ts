@@ -2047,7 +2047,10 @@ const FX_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: string[] 
   cuckoldsessions:      { categories: ["erotic"],     tags: ["cuckold", "erotic", "bbc"] },
 
   // ── Amateur / Casting ─────────────────────────────────────────────────────
-  shesnew:              { categories: ["amateur"],    tags: ["amateur", "casting"] },
+  shesnew:              { categories: ["AMATEUR", "CASTING"],               tags: ["shesnew", "amateur", "casting"] },
+  shoplyfter:           { categories: ["SHOPLYFTER", "EROTIC"],             tags: ["shoplyfter", "erotic"] },
+  sislovesme:           { categories: ["FAMILY", "TABOO", "STEP SISTER"],   tags: ["sislovesme", "stepsister", "taboo"] },
+  usepov:               { categories: ["FREEUSE", "POV", "TABOO"],          tags: ["usepov", "freeuse", "pov", "taboo"] },
   realitykings:         { categories: ["erotic"],     tags: ["hd", "erotic", "amateur"] },
   mofos:                { categories: ["amateur"],    tags: ["amateur", "public", "hd"] },
   netvideogirls:        { categories: ["amateur"],    tags: ["amateur", "casting"] },
@@ -2231,7 +2234,7 @@ function extractFXPornHDMeta(html: string, title = ""): {
       href.includes("/pornstar/") || href.includes("/model/") ||
       href.includes("/actress/")  || href.includes("/studio/")
     ) return;
-    const t = $(el).text().trim().toLowerCase();
+    const t = $(el).text().trim().toLowerCase().replace(/^#/, "");
     if (!t || t.length < 2 || t.length > 40) return;
     if (FX_TAG_BLOCKLIST.has(t)) return;
     if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
@@ -2337,7 +2340,12 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
     `);
     fxPerformerPool = (rows.rows as Array<Record<string, unknown>>)
       .map((r) => r["name"] as string)
-      .filter((n) => Boolean(n) && n.trim().length >= 3);
+      .filter((n) => {
+        if (!n || n.trim().length < 3) return false;
+        // Only use multi-word names (≥2 words) for title matching.
+        // Single-word names (e.g. "busty", "milf") produce false positives.
+        return n.trim().split(/\s+/).length >= 2;
+      });
     logger.info({ count: fxPerformerPool.length }, "scrapeFXPornHD: performer pool loaded for title fallback");
   } catch (poolErr) {
     logger.warn({ poolErr }, "scrapeFXPornHD: could not load performer pool — title fallback disabled");

@@ -312,6 +312,78 @@ async function autoPerformerSanityCleanup(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// purgeUnlistedPerformers — whitelist-only pass: keeps only performers that appear
+// in ≥2 distinct videos (confirmed real), discarding one-off title-injected garbage
+// like "Can Do Stepson", "Shove My Head", "What Your Cock", "Let Me See", "You Don".
+// ---------------------------------------------------------------------------
+
+async function purgeUnlistedPerformers(): Promise<void> {
+  const start = Date.now();
+
+  // Build valid performer set: names that appear across ≥2 videos.
+  // Frequency ≥ 2 means they were linked by HTML or matched multiple times —
+  // real performers appear many times; garbage phrases appear once.
+  const freqRows = await db.execute(sql`
+    SELECT name, COUNT(*) AS cnt
+    FROM (
+      SELECT unnest(${videosTable.pornstars}) AS name
+      FROM ${videosTable}
+      WHERE ${videosTable.status} = 'published'
+    ) sub
+    GROUP BY name
+    HAVING COUNT(*) >= 2
+  `);
+  const validPerformers = new Set<string>(
+    (freqRows.rows as Array<{ name: string }>)
+      .map((r) => r.name?.trim())
+      .filter(Boolean),
+  );
+
+  if (validPerformers.size === 0) {
+    logger.info("purgeUnlistedPerformers: valid set empty — skipping (DB may be freshly seeded)");
+    return;
+  }
+
+  const videos = await db
+    .select({ id: videosTable.id, pornstars: videosTable.pornstars })
+    .from(videosTable);
+
+  let removedCount = 0;
+  const updates: Array<{ id: number; pornstars: string[] }> = [];
+
+  for (const video of videos) {
+    if (!video.pornstars || video.pornstars.length === 0) continue;
+
+    const cleaned = (video.pornstars as string[]).filter((name) =>
+      validPerformers.has(name?.trim()),
+    );
+
+    const removed = video.pornstars.length - cleaned.length;
+    if (removed === 0) continue;
+    removedCount += removed;
+    updates.push({ id: video.id, pornstars: cleaned });
+  }
+
+  const CONCURRENCY = 50;
+  for (let i = 0; i < updates.length; i += CONCURRENCY) {
+    await Promise.all(
+      updates.slice(i, i + CONCURRENCY).map(({ id, pornstars }) =>
+        db.update(videosTable).set({ pornstars }).where(eq(videosTable.id, id)),
+      ),
+    );
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  process.stdout.write(
+    `\n🛠️ [WHITELIST] Removed ${removedCount} unlisted performer entries from ${updates.length} videos in ${elapsed}s\n\n`,
+  );
+  logger.info(
+    { removedCount, validSetSize: validPerformers.size, videosScanned: videos.length, rowsUpdated: updates.length, elapsedSeconds: elapsed },
+    "purgeUnlistedPerformers: complete",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // purgeFakePerformers — remove garbage entries injected by title heuristics
 // ---------------------------------------------------------------------------
 
@@ -762,8 +834,9 @@ app.listen(port, (err?: Error) => {
           .then(() => autoPerformerCleanup())
           .then(() => autoPerformerSanityCleanup())
           .then(() => purgeFakePerformers())
+          .then(() => purgeUnlistedPerformers())
           .catch((err: unknown) =>
-            logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup/purgeFake failed"),
+            logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup/purgeFake/purgeUnlisted failed"),
           );
         autoQualityRepair().catch((err: unknown) =>
           logger.error({ err }, "autoQualityRepair failed"),
