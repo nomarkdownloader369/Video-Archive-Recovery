@@ -1,7 +1,7 @@
 kind = "web"
 previewPath = "/api/"
 title = "API Server"
-description = "Express API server for PervFlix — serves video data, handles scraping from HQporner and FamilyPornHD, and manages the PostgreSQL video index."
+description = "Express API server for PervFlix — serves video data, handles scraping from HQporner and GalaxyPorn, and manages the PostgreSQL video index."
 version = "1.0.0"
 id = "artifacts/api-server"
 router = "path"
