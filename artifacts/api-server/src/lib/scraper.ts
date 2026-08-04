@@ -332,11 +332,34 @@ export function extractPerformersFromGpTitle(title: string): string[] {
   return [];
 }
 
+/**
+ * Words that must never appear inside a real performer name.
+ * Kept in sync with purgeFakePerformers() in index.ts — any addition here
+ * blocks the word at extraction time so the scraper never writes it to the DB.
+ */
+const PERFORMER_FAKE_WORDS = new Set([
+  "his", "is", "to", "fuck", "what", "your", "cock", "cures", "phase",
+  "you", "don", "emo", "alert", "risk", "newcomer", "goddess", "hottie",
+  "delivery", "teach", "me", "her", "the", "and", "for", "with", "gets",
+  "takes", "makes", "turns", "comes", "goes", "wants", "needs", "loves",
+  "fucks", "high", "falling", "love", "routine", "hungry", "busty",
+  "petite", "thick", "slim", "nasty", "horny", "naughty", "dirty",
+]);
+
 export function dedupePerformerNames(names: string[]): string[] {
-  // Drop anything shorter than 4 characters — catches "Vi" (2), "Ali" (3), "Ivo" (3), etc.
-  // This filter runs BEFORE the early-return so single-element arrays like ["Ali"] are cleaned.
-  const filtered = names.filter((n) => n.trim().length >= 4);
+  // Drop anything shorter than 4 characters — catches "Vi" (2), "Ali" (3), etc.
+  // Drop entries with >3 words (not a real name).
+  // Drop entries whose words contain a fake/non-performer word (e.g. "You Don").
+  const filtered = names.filter((n) => {
+    const trimmed = n.trim();
+    if (trimmed.length < 4) return false;
+    const words = trimmed.toLowerCase().split(/\s+/);
+    if (words.length > 3) return false;
+    if (words.some((w) => PERFORMER_FAKE_WORDS.has(w))) return false;
+    return true;
+  });
   if (filtered.length < 2) return filtered;
+  // Sort longest-first, then drop any name that is a substring of an already-accepted longer name.
   const sorted  = [...filtered].sort((a, b) => b.length - a.length);
   const accepted: string[] = [];
   for (const name of sorted) {
