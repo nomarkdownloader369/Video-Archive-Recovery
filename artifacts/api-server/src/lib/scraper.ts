@@ -1638,7 +1638,7 @@ function extractGalaxyPornMeta(html: string): {
       href.includes("/pornstar/") || href.includes("/model/") ||
       href.includes("/actress/")  || href.includes("/studio/")
     ) return;
-    const t = $(el).text().trim().toLowerCase();
+    const t = $(el).text().trim().toLowerCase().replace(/^#+/, "");
     if (!t || t.length < 2 || t.length > 40) return;
     if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
   });
@@ -1864,6 +1864,28 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
         // Dedup partial substrings before persisting.
         const rawPornstars = performers;
         const mergedTags = Array.from(tagSet);
+
+        // Studio taxonomy injection — same logic as FXPornHD so both scrapers
+        // produce consistent category/tag data from bracketed title prefixes.
+        // Dynamic fallback: unknown studios get their normalised name as a plain tag.
+        const gpStudioMatch = v.title.match(/^\[([^\]]+)\]/);
+        if (gpStudioMatch) {
+          const gpStudioNorm  = gpStudioMatch[1].toLowerCase().replace(/[\s\-_]/g, "");
+          const gpStudioEntry = UNIVERSAL_STUDIO_TAXONOMY[gpStudioNorm];
+          if (gpStudioEntry) {
+            for (const c of gpStudioEntry.categories) {
+              if (!tagSet.has(c)) { tagSet.add(c); mergedTags.push(c); }
+            }
+            for (const t of gpStudioEntry.tags) {
+              if (!tagSet.has(t)) { tagSet.add(t); mergedTags.push(t); }
+            }
+          } else {
+            // Dynamic fallback — normalised studio name as plain alphanumeric tag (no "#")
+            const dynTag = gpStudioNorm.replace(/[^a-z0-9]/g, "");
+            if (dynTag && !tagSet.has(dynTag)) { tagSet.add(dynTag); mergedTags.push(dynTag); }
+          }
+        }
+
         const titleLcQ = v.title.toLowerCase();
         const has4KDetail = titleLcQ.includes("4k") || titleLcQ.includes("2160p") ||
           mergedTags.some((t) => t.toLowerCase() === "4k" || t.toLowerCase() === "2160p");
@@ -1908,11 +1930,11 @@ const FX_BASE     = "https://fxpornhd.com";
 const FX_DELAY_MS = 600;
 
 // ---------------------------------------------------------------------------
-// FXPornHD studio → category/tag map  (module-level so both extract & helpers share it)
+// Universal studio → category/tag map  (shared by FXPornHD + GalaxyPorn scrapers)
 // ---------------------------------------------------------------------------
 
 /**
- * Comprehensive studio taxonomy for FXPornHD bracketed-prefix titles.
+ * UNIVERSAL_STUDIO_TAXONOMY — single source-of-truth for all scrapers.
  *
  * Keys are normalised (lowercase, spaces/hyphens/underscores stripped) so they
  * match `studioMatch[1].toLowerCase().replace(/[\s\-_]/g, "")`.
@@ -1920,135 +1942,154 @@ const FX_DELAY_MS = 600;
  * Each entry carries:
  *   categories — ordered list; first entry becomes the video's primary category.
  *   tags       — all content tags to inject (merged with HTML-derived tags).
+ *                All tags are plain lowercase strings — NO leading "#".
  */
-const FX_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: string[] }> = {
-  // ── Milf / Stepmom ────────────────────────────────────────────────────────
-  analmom:              { categories: ["anal"],       tags: ["anal", "milf", "stepmom", "mature"] },
-  mommygotboobs:        { categories: ["milf"],       tags: ["milf", "big boobs", "mature"] },
-  momsteachsex:         { categories: ["milf"],       tags: ["milf", "taboo", "stepmom"] },
-  momsinsex:            { categories: ["milf"],       tags: ["milf", "taboo", "mature"] },
-  pervmom:              { categories: ["milf"],       tags: ["milf", "stepmom", "taboo"] },
-  pervmoms:             { categories: ["milf"],       tags: ["milf", "stepmom", "taboo"] },
-  brattymilf:           { categories: ["milf"],       tags: ["milf", "family", "mature"] },
-  brattyMILF:           { categories: ["milf"],       tags: ["milf", "family", "mature"] },
-  myfavoritemilf:       { categories: ["milf"],       tags: ["milf", "mature"] },
-  mylf:                 { categories: ["milf"],       tags: ["milf", "mature", "hd"] },
-  milfhunter:           { categories: ["milf"],       tags: ["milf", "amateur", "mature"] },
-  momxxx:               { categories: ["milf"],       tags: ["milf", "taboo", "stepmom"] },
-  stepmomlessons:       { categories: ["milf"],       tags: ["milf", "stepmom", "taboo"] },
+const UNIVERSAL_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: string[] }> = {
+  // ── Shoplyfter ────────────────────────────────────────────────────────────
+  shoplyfter:           { categories: ["SHOPLYFTER", "EROTIC"],                    tags: ["shoplyfter", "erotic"] },
+  shoplyfterMYLF:       { categories: ["SHOPLYFTER", "EROTIC"],                    tags: ["shoplyfter", "erotic", "milf"] },
+  shoplyfterMylf:       { categories: ["SHOPLYFTER", "EROTIC"],                    tags: ["shoplyfter", "erotic", "milf"] },
+  shoplifters:          { categories: ["SHOPLYFTER", "EROTIC"],                    tags: ["shoplyfter", "erotic"] },
 
-  // ── Family / Taboo ────────────────────────────────────────────────────────
-  sexmex:               { categories: ["taboo"],      tags: ["family", "taboo", "stepmom", "latina"] },
-  puretaboo:            { categories: ["taboo"],      tags: ["taboo", "family", "fetish"] },
-  familystrokes:        { categories: ["family"],     tags: ["family", "taboo", "stepsis"] },
-  brattysis:            { categories: ["taboo"],      tags: ["taboo", "stepsis", "family"] },
-  dadcrush:             { categories: ["taboo"],      tags: ["family", "taboo", "stepdad"] },
-  filthyfamily:         { categories: ["family"],     tags: ["family", "taboo"] },
-  myfamilypies:         { categories: ["family"],     tags: ["family", "taboo", "amateur"] },
-  mypervyfamily:        { categories: ["family"],     tags: ["family", "taboo"] },
-  bffs:                 { categories: ["erotic"],     tags: ["group", "amateur", "teen"] },
-  daughterswap:         { categories: ["taboo"],      tags: ["family", "taboo"] },
-  momswap:              { categories: ["taboo"],      tags: ["family", "taboo", "milf"] },
-  auntswap:             { categories: ["taboo"],      tags: ["family", "taboo", "milf"] },
-  familytherapy:        { categories: ["taboo"],      tags: ["taboo", "family"] },
-  stepsiblingscaught:   { categories: ["taboo"],      tags: ["taboo", "stepsis", "family"] },
+  // ── Step-Siblings ─────────────────────────────────────────────────────────
+  sislovesme:           { categories: ["FAMILY", "TABOO", "STEP SISTER"],          tags: ["stepsister", "taboo", "family"] },
+  brattysis:            { categories: ["FAMILY", "TABOO", "STEP SISTER"],          tags: ["stepsister", "taboo", "family"] },
+  stepsiblings:         { categories: ["FAMILY", "TABOO", "STEP SISTER"],          tags: ["stepsister", "taboo", "family"] },
+  stepsiblingscaught:   { categories: ["FAMILY", "TABOO", "STEP SISTER"],          tags: ["stepsister", "taboo", "family"] },
 
-  // ── Anal ──────────────────────────────────────────────────────────────────
-  evilangel:            { categories: ["anal"],       tags: ["anal", "hd", "hardcore"] },
-  tushy:                { categories: ["anal"],       tags: ["anal", "erotic", "hd"] },
-  tushyraw:             { categories: ["anal"],       tags: ["anal", "amateur", "hd"] },
-  assholefever:         { categories: ["anal"],       tags: ["anal", "hardcore"] },
-  analonly:             { categories: ["anal"],       tags: ["anal", "hd"] },
+  // ── Stepmom / Family Milf ─────────────────────────────────────────────────
+  mypervyfamily:        { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  momcomesfirst:        { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  momsfirst:            { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  momsteachsex:         { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  momscomefirst:        { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  analmom:              { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf", "anal"] },
+  mommygotboobs:        { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf", "big boobs"] },
+  momsinsex:            { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  pervmom:              { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  pervmoms:             { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  brattymilf:           { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "milf", "family"] },
+  brattyMILF:           { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "milf", "family"] },
+  myfavoritemilf:       { categories: ["milf"],                                     tags: ["milf", "mature"] },
+  mylf:                 { categories: ["milf"],                                     tags: ["milf", "mature", "hd"] },
+  milfhunter:           { categories: ["milf"],                                     tags: ["milf", "amateur", "mature"] },
+  momxxx:               { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  stepmomlessons:       { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf"] },
+  fillupmymom:          { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf", "creampie"] },
+  hijabmylfs:           { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "milf", "hijab", "mature"] },
 
-  // ── Lesbian ───────────────────────────────────────────────────────────────
-  twistys:              { categories: ["erotic"],     tags: ["erotic", "solo", "lesbian"] },
-  loveher:              { categories: ["lesbian"],    tags: ["lesbian", "erotic"] },
-  girlfriendsfilms:     { categories: ["lesbian"],    tags: ["lesbian", "erotic", "hd"] },
-  sweetheartvideo:      { categories: ["lesbian"],    tags: ["lesbian", "erotic"] },
-  girlsway:             { categories: ["lesbian"],    tags: ["lesbian", "erotic", "hd"] },
-  tribbing:             { categories: ["lesbian"],    tags: ["lesbian", "erotic"] },
-  slayed:               { categories: ["lesbian"],    tags: ["lesbian", "erotic", "hd"] },
-  nubilefilms:          { categories: ["erotic"],     tags: ["erotic", "lesbian", "hd"] },
-
-  // ── BBC / Interracial ─────────────────────────────────────────────────────
-  blacked:              { categories: ["erotic"],     tags: ["bbc", "interracial", "erotic"] },
-  blackedraw:           { categories: ["erotic"],     tags: ["bbc", "interracial", "amateur"] },
-  cuckoldsessions:      { categories: ["erotic"],     tags: ["cuckold", "erotic", "bbc"] },
+  // ── Family / Taboo (general) ──────────────────────────────────────────────
+  familystrokes:        { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
+  familytherapy:        { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
+  dadcrush:             { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
+  daughterswap:         { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
+  sexmex:               { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family", "stepmom", "latina"] },
+  filthyfamily:         { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
+  myfamilypies:         { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family", "amateur"] },
+  momswap:              { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family", "milf"] },
+  auntswap:             { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family", "milf"] },
+  mysistershotfriend:   { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "stepsister", "friend"] },
+  neighboraffair:       { categories: ["erotic"],                                  tags: ["erotic", "milf", "cheating"] },
 
   // ── Amateur / Casting ─────────────────────────────────────────────────────
-  shesnew:              { categories: ["AMATEUR", "CASTING"],               tags: ["shesnew", "amateur", "casting"] },
-  shoplyfter:           { categories: ["SHOPLYFTER", "EROTIC"],             tags: ["shoplyfter", "erotic"] },
-  sislovesme:           { categories: ["FAMILY", "TABOO", "STEP SISTER"],   tags: ["sislovesme", "stepsister", "taboo"] },
-  usepov:               { categories: ["FREEUSE", "POV", "TABOO"],          tags: ["usepov", "freeuse", "pov", "taboo"] },
-  realitykings:         { categories: ["erotic"],     tags: ["hd", "erotic", "amateur"] },
-  mofos:                { categories: ["amateur"],    tags: ["amateur", "public", "hd"] },
-  netvideogirls:        { categories: ["amateur"],    tags: ["amateur", "casting"] },
-  stranded:             { categories: ["amateur"],    tags: ["amateur", "outdoor"] },
+  shesnew:              { categories: ["AMATEUR", "CASTING"],                      tags: ["shesnew", "amateur", "casting"] },
+  realitykings:         { categories: ["erotic"],                                  tags: ["hd", "erotic", "amateur"] },
+  mofos:                { categories: ["amateur"],                                  tags: ["amateur", "public", "hd"] },
+  netvideogirls:        { categories: ["amateur"],                                  tags: ["amateur", "casting"] },
+  stranded:             { categories: ["amateur"],                                  tags: ["amateur", "outdoor"] },
+
+  // ── Freeuse / POV ─────────────────────────────────────────────────────────
+  usepov:               { categories: ["FREEUSE", "POV", "TABOO"],                 tags: ["usepov", "freeuse", "pov", "taboo"] },
+  freeuse:              { categories: ["FREEUSE", "POV", "TABOO"],                 tags: ["freeuse", "pov", "taboo"] },
+  freeuseFantasy:       { categories: ["FREEUSE", "POV", "TABOO"],                 tags: ["freeuse", "pov", "taboo"] },
+  freeusfantasy:        { categories: ["FREEUSE", "POV", "TABOO"],                 tags: ["freeuse", "pov", "taboo"] },
+
+  // ── Erotic Drama / Pure Taboo / MissaX ───────────────────────────────────
+  missax:               { categories: ["TABOO", "EROTIC", "DRAMA"],                tags: ["puretaboo", "taboo"] },
+  puretaboo:            { categories: ["TABOO", "EROTIC", "DRAMA"],                tags: ["puretaboo", "taboo"] },
+  sweetsinner:          { categories: ["TABOO", "EROTIC", "DRAMA"],                tags: ["puretaboo", "taboo"] },
+
+  // ── Cuckold ───────────────────────────────────────────────────────────────
+  cuck4k:               { categories: ["CUCKOLD", "TABOO", "FETISH"],              tags: ["cuckold", "taboo", "fetish"] },
+  cuckoldsessions:      { categories: ["CUCKOLD", "TABOO", "FETISH"],              tags: ["cuckold", "taboo", "fetish"] },
+
+  // ── Premium Studios (Brazzers / BangBros network) ─────────────────────────
+  brazzers:             { categories: ["erotic"],                                  tags: ["hd", "erotic", "big boobs"] },
+  brazzersexxtra:       { categories: ["ONLYFANS", "BIG ASS", "HD"],               tags: ["hd", "bigass", "premium"] },
+  brazzersExxtra:       { categories: ["ONLYFANS", "BIG ASS", "HD"],               tags: ["hd", "bigass", "premium"] },
+  brazzerseexxtra:      { categories: ["ONLYFANS", "BIG ASS", "HD"],               tags: ["hd", "bigass", "premium"] },
+  bangbros:             { categories: ["ONLYFANS", "BIG ASS", "HD"],               tags: ["hd", "bigass", "premium"] },
+  bangbroschannel:      { categories: ["ONLYFANS", "BIG ASS", "HD"],               tags: ["hd", "bigass", "premium"] },
+  pornworld:            { categories: ["erotic"],                                  tags: ["hd", "onlyfans", "erotic"] },
+  wicked:               { categories: ["erotic"],                                  tags: ["erotic", "hd", "storyline"] },
+  digitalplayground:    { categories: ["erotic"],                                  tags: ["hd", "erotic", "storyline"] },
+  devilsfilm:           { categories: ["erotic"],                                  tags: ["erotic", "hd", "taboo"] },
+  vixen:                { categories: ["erotic"],                                  tags: ["erotic", "hd", "glamour"] },
+  deeper:               { categories: ["anal"],                                    tags: ["erotic", "hd", "anal"] },
+  teamskeet:            { categories: ["erotic"],                                  tags: ["erotic", "teen", "hd"] },
+  ddfnetwork:           { categories: ["erotic"],                                  tags: ["erotic", "hd", "european"] },
+  sexart:               { categories: ["erotic"],                                  tags: ["erotic", "artistic", "hd"] },
+  metrohd:              { categories: ["erotic"],                                  tags: ["erotic", "hd", "big boobs"] },
+  penthouse:            { categories: ["erotic"],                                  tags: ["erotic", "solo", "glamour"] },
+  vivid:                { categories: ["erotic"],                                  tags: ["erotic", "hd"] },
+  playboy:              { categories: ["erotic"],                                  tags: ["erotic", "solo", "glamour"] },
+  rkprime:              { categories: ["erotic"],                                  tags: ["erotic", "hd", "amateur"] },
+  onlyfans:             { categories: ["onlyfans"],                                tags: ["onlyfans", "amateur", "hd"] },
+  onlytarts:            { categories: ["erotic"],                                  tags: ["erotic", "hd"] },
+  bffs:                 { categories: ["erotic"],                                  tags: ["group", "amateur", "teen"] },
+
+  // ── Fake Taxi / Uniform ───────────────────────────────────────────────────
+  femalefaketaxi:       { categories: ["TAXI", "UNIFORM", "EROTIC"],               tags: ["faketaxi", "uniform", "erotic"] },
+  faketaxi:             { categories: ["TAXI", "UNIFORM", "EROTIC"],               tags: ["faketaxi", "uniform", "erotic"] },
+
+  // ── Anal / Hardcore ───────────────────────────────────────────────────────
+  analtherapy:          { categories: ["ANAL", "HARDCORE"],                        tags: ["anal", "hardcore"] },
+  dickdrainers:         { categories: ["ANAL", "HARDCORE"],                        tags: ["anal", "hardcore"] },
+  throated:             { categories: ["ANAL", "HARDCORE"],                        tags: ["anal", "hardcore"] },
+  evilangel:            { categories: ["ANAL", "HARDCORE"],                        tags: ["anal", "hd", "hardcore"] },
+  tushy:                { categories: ["anal"],                                    tags: ["anal", "erotic", "hd"] },
+  tushyraw:             { categories: ["anal"],                                    tags: ["anal", "amateur", "hd"] },
+  assholefever:         { categories: ["ANAL", "HARDCORE"],                        tags: ["anal", "hardcore"] },
+  analonly:             { categories: ["ANAL", "HARDCORE"],                        tags: ["anal", "hd", "hardcore"] },
+
+  // ── Lesbian ───────────────────────────────────────────────────────────────
+  twistys:              { categories: ["erotic"],                                  tags: ["erotic", "solo", "lesbian"] },
+  loveher:              { categories: ["lesbian"],                                 tags: ["lesbian", "erotic"] },
+  girlfriendsfilms:     { categories: ["lesbian"],                                 tags: ["lesbian", "erotic", "hd"] },
+  sweetheartvideo:      { categories: ["lesbian"],                                 tags: ["lesbian", "erotic"] },
+  girlsway:             { categories: ["lesbian"],                                 tags: ["lesbian", "erotic", "hd"] },
+  tribbing:             { categories: ["lesbian"],                                 tags: ["lesbian", "erotic"] },
+  slayed:               { categories: ["lesbian"],                                 tags: ["lesbian", "erotic", "hd"] },
+  nubilefilms:          { categories: ["erotic"],                                  tags: ["erotic", "lesbian", "hd"] },
+
+  // ── BBC / Interracial ─────────────────────────────────────────────────────
+  blacked:              { categories: ["erotic"],                                  tags: ["bbc", "interracial", "erotic"] },
+  blackedraw:           { categories: ["erotic"],                                  tags: ["bbc", "interracial", "amateur"] },
 
   // ── BDSM / Fetish ─────────────────────────────────────────────────────────
-  kink:                 { categories: ["bdsm"],       tags: ["bdsm", "fetish", "bondage"] },
-  fantasticfetiches:    { categories: ["fetish"],     tags: ["fetish", "bdsm"] },
-  sissylogs:            { categories: ["fetish"],     tags: ["fetish", "sissy", "femdom"] },
-  newmfx:               { categories: ["fetish"],     tags: ["fetish", "brazil"] },
-  burningangel:         { categories: ["erotic"],     tags: ["alternative", "tattoo", "punk"] },
+  kink:                 { categories: ["bdsm"],                                    tags: ["bdsm", "fetish", "bondage"] },
+  fantasticfetiches:    { categories: ["fetish"],                                  tags: ["fetish", "bdsm"] },
+  sissylogs:            { categories: ["fetish"],                                  tags: ["fetish", "sissy", "femdom"] },
+  newmfx:               { categories: ["fetish"],                                  tags: ["fetish", "brazil"] },
+  burningangel:         { categories: ["erotic"],                                  tags: ["alternative", "tattoo", "punk"] },
 
   // ── Big / Curvy ───────────────────────────────────────────────────────────
-  score:                { categories: ["erotic"],     tags: ["big boobs", "erotic", "mature"] },
-  scoreland:            { categories: ["erotic"],     tags: ["big boobs", "busty", "mature"] },
-
-  // ── Premium / Studio Erotic ───────────────────────────────────────────────
-  brazzers:             { categories: ["erotic"],     tags: ["hd", "erotic", "big boobs"] },
-  brazzersExxtra:       { categories: ["erotic"],     tags: ["hd", "onlyfans", "big boobs"] },
-  brazzerseexxtra:      { categories: ["erotic"],     tags: ["hd", "onlyfans", "big boobs"] },
-  pornworld:            { categories: ["erotic"],     tags: ["hd", "onlyfans", "erotic"] },
-  bangbros:             { categories: ["erotic"],     tags: ["hd", "erotic", "big ass"] },
-  bangbroschannel:      { categories: ["erotic"],     tags: ["hd", "erotic", "big ass"] },
-  wicked:               { categories: ["erotic"],     tags: ["erotic", "hd", "storyline"] },
-  digitalplayground:    { categories: ["erotic"],     tags: ["hd", "erotic", "storyline"] },
-  devilsfilm:           { categories: ["erotic"],     tags: ["erotic", "hd", "taboo"] },
-  vixen:                { categories: ["erotic"],     tags: ["erotic", "hd", "glamour"] },
-  deeper:               { categories: ["anal"],       tags: ["erotic", "hd", "anal"] },
-  teamskeet:            { categories: ["erotic"],     tags: ["erotic", "teen", "hd"] },
-  ddfnetwork:           { categories: ["erotic"],     tags: ["erotic", "hd", "european"] },
-  sexart:               { categories: ["erotic"],     tags: ["erotic", "artistic", "hd"] },
-  metrohd:              { categories: ["erotic"],     tags: ["erotic", "hd", "big boobs"] },
-  penthouse:            { categories: ["erotic"],     tags: ["erotic", "solo", "glamour"] },
-  vivid:                { categories: ["erotic"],     tags: ["erotic", "hd"] },
-  playboy:              { categories: ["erotic"],     tags: ["erotic", "solo", "glamour"] },
+  score:                { categories: ["erotic"],                                  tags: ["big boobs", "erotic", "mature"] },
+  scoreland:            { categories: ["erotic"],                                  tags: ["big boobs", "busty", "mature"] },
+  bigtitcreampie:       { categories: ["erotic"],                                  tags: ["big boobs", "creampie", "erotic"] },
 
   // ── Office / Uniform ──────────────────────────────────────────────────────
-  naughtyoffice:        { categories: ["erotic"],     tags: ["office", "erotic", "uniform"] },
-  naughtyamerica:       { categories: ["erotic"],     tags: ["erotic", "hd", "uniform"] },
+  naughtyoffice:        { categories: ["erotic"],                                  tags: ["office", "erotic", "uniform"] },
+  naughtyamerica:       { categories: ["erotic"],                                  tags: ["erotic", "hd", "uniform"] },
 
   // ── POV ───────────────────────────────────────────────────────────────────
-  povmaster:            { categories: ["erotic"],     tags: ["pov", "erotic"] },
-  povlife:              { categories: ["erotic"],     tags: ["pov", "erotic", "amateur"] },
-
-  // ── Brazzers correct lowercase key (brazzersExxtra key above is broken) ──
-  brazzersexxtra:       { categories: ["erotic"],     tags: ["hd", "erotic", "big boobs"] },
-
-  // ── Step-family / Taboo (additional studios) ─────────────────────────────
-  missax:               { categories: ["taboo"],      tags: ["taboo", "family", "erotic"] },
-  mysistershotfriend:   { categories: ["taboo"],      tags: ["taboo", "stepsis", "friend"] },
-  neighboraffair:       { categories: ["erotic"],     tags: ["erotic", "milf", "cheating"] },
-  fillupmymom:          { categories: ["milf"],       tags: ["milf", "stepmom", "creampie"] },
-  hijabmylfs:           { categories: ["milf"],       tags: ["milf", "hijab", "mature", "taboo"] },
+  povmaster:            { categories: ["erotic"],                                  tags: ["pov", "erotic"] },
+  povlife:              { categories: ["erotic"],                                  tags: ["pov", "erotic", "amateur"] },
 
   // ── Teen / Young ──────────────────────────────────────────────────────────
-  princesscum:          { categories: ["erotic"],     tags: ["erotic", "teen", "hd"] },
-  newsensations:        { categories: ["erotic"],     tags: ["erotic", "hd", "big boobs"] },
-  oyeloca:              { categories: ["erotic"],     tags: ["erotic", "latina", "amateur"] },
-
-  // ── Big Boobs / Creampie ──────────────────────────────────────────────────
-  bigtitcreampie:       { categories: ["erotic"],     tags: ["big boobs", "creampie", "erotic"] },
-
-  // ── Alternative / Euro ────────────────────────────────────────────────────
-  femalefaketaxi:       { categories: ["erotic"],     tags: ["erotic", "pov", "euro", "fake taxi"] },
-
-  // ── Network / Premium ─────────────────────────────────────────────────────
-  rkprime:              { categories: ["erotic"],     tags: ["erotic", "hd", "amateur"] },
-  onlyfans:             { categories: ["onlyfans"],   tags: ["onlyfans", "amateur", "hd"] },
-  onlytarts:            { categories: ["erotic"],     tags: ["erotic", "hd"] },
+  princesscum:          { categories: ["erotic"],                                  tags: ["erotic", "teen", "hd"] },
+  newsensations:        { categories: ["erotic"],                                  tags: ["erotic", "hd", "big boobs"] },
+  oyeloca:              { categories: ["erotic"],                                  tags: ["erotic", "latina", "amateur"] },
 };
 
 /**
@@ -2065,7 +2106,7 @@ function inferFxCategoryFromTitle(title: string, tags: string[]): string {
   const studioMatch = title.match(/^\[([^\]]+)\]/);
   if (studioMatch) {
     const studioNorm = studioMatch[1].toLowerCase().replace(/[\s\-_]/g, "");
-    const studioEntry = FX_STUDIO_TAXONOMY[studioNorm];
+    const studioEntry = UNIVERSAL_STUDIO_TAXONOMY[studioNorm];
     if (studioEntry && studioEntry.categories.length > 0) {
       return studioEntry.categories[0];     // first category is the primary one
     }
@@ -2226,15 +2267,17 @@ function extractFXPornHDMeta(html: string, title = ""): {
     });
   }
 
-  // Step 2 — Bracketed studio → full taxonomy injection (FX_STUDIO_TAXONOMY).
+  // Step 2 — Bracketed studio → full taxonomy injection (UNIVERSAL_STUDIO_TAXONOMY).
   // Titles follow "[StudioName] ..." — normalise the prefix, look up the taxonomy,
   // then inject ALL declared tags (categories + tags). Always runs when a studio
   // prefix is found, regardless of what HTML tags were present.
+  // Dynamic fallback: if the studio is not in the taxonomy, push the normalised
+  // studio name itself as a plain lowercase tag (e.g. "[NaughtyOffice]" → "naughtyoffice").
   if (title) {
     const studioMatch = title.match(/^\[([^\]]+)\]/);
     if (studioMatch) {
       const studioNorm  = studioMatch[1].toLowerCase().replace(/[\s\-_]/g, "");
-      const studioEntry = FX_STUDIO_TAXONOMY[studioNorm];
+      const studioEntry = UNIVERSAL_STUDIO_TAXONOMY[studioNorm];
       if (studioEntry) {
         // Inject category tokens first so they appear at the front of the list
         for (const c of studioEntry.categories) {
@@ -2243,6 +2286,10 @@ function extractFXPornHDMeta(html: string, title = ""): {
         for (const t of studioEntry.tags) {
           if (!tagSeen.has(t)) { tagSeen.add(t); tags.push(t); }
         }
+      } else {
+        // Dynamic fallback — normalise to plain alphanumeric tag (no "#")
+        const dynTag = studioNorm.replace(/[^a-z0-9]/g, "");
+        if (dynTag && !tagSeen.has(dynTag)) { tagSeen.add(dynTag); tags.push(dynTag); }
       }
     }
   }
