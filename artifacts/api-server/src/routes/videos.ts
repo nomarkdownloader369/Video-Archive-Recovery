@@ -204,9 +204,15 @@ router.get("/thumb", async (req: Request, res: Response) => {
     return;
   }
   try {
+    // Use the image's own origin as the Referer so hotlink protection
+    // on every source (hqporner, fxpornhd, galaxyporn, etc.) is satisfied.
+    const sourceReferer = (() => {
+      try { const u = new URL(url); return `${u.protocol}//${u.host}/`; }
+      catch { return "https://hqporner.com/"; }
+    })();
     const upstream = await fetch(url, {
       headers: {
-        "Referer": "https://hqporner.com/",
+        "Referer": sourceReferer,
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",

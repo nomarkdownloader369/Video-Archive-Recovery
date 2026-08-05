@@ -126,12 +126,11 @@ export const PORNSTARS: Pornstar[] = [
 
 export function thumbUrl(seed: string, _w = 800, _h = 450) {
   const full = seed.startsWith("//") ? `https:${seed}` : seed;
-  if (
-    full.includes("fastporndelivery.hqporner.com") ||
-    full.includes("hqporner.com/imgs")
-  ) {
+  // Proxy ALL external thumbnail URLs through the backend so they are served
+  // from the same origin as the app. This bypasses hotlink protection, CORP
+  // headers, and any browser cross-origin restrictions regardless of source.
+  if (full.startsWith("https://") || full.startsWith("http://")) {
     return `/api/pf/thumb?url=${encodeURIComponent(full)}`;
   }
-  if (full.startsWith("https://") || full.startsWith("http://")) return full;
   return `https://picsum.photos/seed/${encodeURIComponent(seed)}/800/450`;
 }
