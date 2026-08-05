@@ -30,6 +30,8 @@ Workflows (managed automatically):
 - **`artifacts/api-server: web`** — Express API server (PORT 22729)
 - **`artifacts/mockup-sandbox: Component Preview Server`** — Canvas sandbox (PORT 23636)
 
+> Note: The old `API Server` and `PervFlix Frontend` workflows are legacy stubs — the managed artifact workflows above are the active ones.
+
 ## Database
 
 Uses Replit's built-in PostgreSQL. Schema: `lib/db/src/schema/videos.ts`
