@@ -14,7 +14,6 @@ import {
   scrapeGalaxyPorn,
   scrapeFXPornHD,
   dedupePerformerNames,
-  extractPerformersFromGpTitle,
 } from "./lib/scraper";
 
 // 7 empty/low-video categories seeded immediately on boot via targeted keyword search.
@@ -154,18 +153,7 @@ async function autoPerformerRepair(): Promise<void> {
     const existing = new Set(video.pornstars.map((p: string) => p.toLowerCase()));
     const toAdd: string[] = [];
 
-    // ── Pass A: extract names directly from the structured title ─────────────
-    // Both HQporner and GalaxyPorn use "[Studio] Name1, Name2 – Movie Title".
-    // extractPerformersFromGpTitle handles the parse; names < 3 chars are dropped.
-    const fromTitle = extractPerformersFromGpTitle(video.title);
-    for (const name of fromTitle) {
-      if (!existing.has(name.toLowerCase())) {
-        toAdd.push(name);
-        existing.add(name.toLowerCase());
-      }
-    }
-
-    // ── Pass B: for GalaxyPorn rows, also cross-match the full DB performer pool
+    // ── Pass B: for GalaxyPorn rows, cross-match the full DB performer pool
     // This catches performers whose names happen NOT to appear in the title segment
     // (e.g. listed on the source page but not in the title) and were already indexed
     // from another video.
@@ -404,6 +392,64 @@ async function purgeUnlistedPerformers(): Promise<void> {
 // ---------------------------------------------------------------------------
 // purgeFakePerformers — remove garbage entries injected by title heuristics
 // ---------------------------------------------------------------------------
+
+async function purgeGarbageModels(): Promise<void> {
+  const start = Date.now();
+
+  // Exact garbage words (case-insensitive) — any pornstars entry containing one
+  // of these as a whole word is removed immediately.
+  const GARBAGE_WORDS = new Set([
+    "big tits", "blowjobs", "stepmoms", "stepsis", "wimp", "massage",
+    "fun sized", "halloween", "memorial", "swingers", "let me", "can do",
+    "your cock", "shove my", "head", "teen", "amateur", "porn", "fuck",
+    "cum", "what your", "you don", "is to",
+  ]);
+
+  const videos = await db
+    .select({ id: videosTable.id, pornstars: videosTable.pornstars })
+    .from(videosTable);
+
+  let removedCount = 0;
+  const updates: Array<{ id: number; pornstars: string[] }> = [];
+
+  for (const video of videos) {
+    if (!video.pornstars || video.pornstars.length === 0) continue;
+
+    const cleaned = (video.pornstars as string[]).filter((name) => {
+      const nameLower = name.trim().toLowerCase();
+      // Remove if name contains more than 3 words
+      if (name.trim().split(/\s+/).length > 3) return false;
+      // Remove if any garbage phrase matches as a whole substring
+      for (const garbage of GARBAGE_WORDS) {
+        if (nameLower === garbage || nameLower.includes(garbage)) return false;
+      }
+      return true;
+    });
+
+    const removed = video.pornstars.length - cleaned.length;
+    if (removed === 0) continue;
+    removedCount += removed;
+    updates.push({ id: video.id, pornstars: cleaned });
+  }
+
+  const CONCURRENCY = 50;
+  for (let i = 0; i < updates.length; i += CONCURRENCY) {
+    await Promise.all(
+      updates.slice(i, i + CONCURRENCY).map(({ id, pornstars }) =>
+        db.update(videosTable).set({ pornstars }).where(eq(videosTable.id, id)),
+      ),
+    );
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  process.stdout.write(
+    `\n🧹 [GARBAGE] Purged ${removedCount} garbage model entries from ${updates.length} videos in ${elapsed}s\n\n`,
+  );
+  logger.info(
+    { removedCount, videosScanned: videos.length, rowsUpdated: updates.length, elapsedSeconds: elapsed },
+    "purgeGarbageModels: complete",
+  );
+}
 
 async function purgeFakePerformers(): Promise<void> {
   const start = Date.now();
@@ -858,10 +904,11 @@ app.listen(port, (err?: Error) => {
         autoPerformerRepair()
           .then(() => autoPerformerCleanup())
           .then(() => autoPerformerSanityCleanup())
+          .then(() => purgeGarbageModels())
           .then(() => purgeFakePerformers())
           .then(() => purgeUnlistedPerformers())
           .catch((err: unknown) =>
-            logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup/purgeFake/purgeUnlisted failed"),
+            logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup/purgeGarbage/purgeFake/purgeUnlisted failed"),
           );
         autoQualityRepair().catch((err: unknown) =>
           logger.error({ err }, "autoQualityRepair failed"),
