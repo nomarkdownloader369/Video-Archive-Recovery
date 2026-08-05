@@ -1,1 +1,2 @@
 - [PervFlix setup](pervflix-setup.md) — artifact registration gotcha: backup must come from zip, not from post-createArtifact scaffold; Vite proxy needed for /api.
+- [PervFlix performer data-quality](pervflix-performer-cleanup.md) — FXPornHD blocklist, gp- trust fix, FAKE_WORDS false-positives ("love"/"loves"), dedupePerformerNames min=3.

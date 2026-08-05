@@ -320,9 +320,13 @@ async function autoPerformerSanityCleanup(): Promise<void> {
 async function purgeUnlistedPerformers(): Promise<void> {
   const start = Date.now();
 
-  // Build valid performer set: names that appear across ≥2 videos.
-  // Frequency ≥ 2 means they were linked by HTML or matched multiple times —
-  // real performers appear many times; garbage phrases appear once.
+  // Build valid performer set:
+  // (a) Any name appearing in ≥2 videos — frequency-validated real performers.
+  //     Frequency ≥ 2 means they were linked by HTML or title-matched multiple
+  //     times; garbage one-off phrases from title heuristics appear only once.
+  // (b) Any name on a gp- (GalaxyPorn) video — those titles follow the reliable
+  //     "[Studio] Name – Title" format, so each extracted name is trustworthy
+  //     even if the performer only has one indexed video so far.
   const freqRows = await db.execute(sql`
     SELECT name, COUNT(*) AS cnt
     FROM (
@@ -338,6 +342,20 @@ async function purgeUnlistedPerformers(): Promise<void> {
       .map((r) => r.name?.trim())
       .filter(Boolean),
   );
+
+  // Trust all performers extracted from GalaxyPorn titles (gp- slug prefix).
+  try {
+    const gpRows = await db.execute(sql`
+      SELECT DISTINCT unnest(${videosTable.pornstars}) AS name
+      FROM ${videosTable}
+      WHERE slug LIKE 'gp-%' AND ${videosTable.status} = 'published'
+    `);
+    for (const r of gpRows.rows as Array<{ name: string }>) {
+      if (r.name?.trim()) validPerformers.add(r.name.trim());
+    }
+  } catch (gpErr) {
+    logger.warn({ gpErr }, "purgeUnlistedPerformers: could not load gp- performer trust set");
+  }
 
   if (validPerformers.size === 0) {
     logger.info("purgeUnlistedPerformers: valid set empty — skipping (DB may be freshly seeded)");
@@ -392,13 +410,20 @@ async function purgeFakePerformers(): Promise<void> {
 
   // Words that should never appear inside a real performer name.
   // Any pornstars entry whose words include one of these is synthetic garbage.
+  // Also includes anatomy/category terms that fxpornhd.com lists as /actor/ links.
   const FAKE_WORDS = new Set([
     "his", "is", "to", "fuck", "what", "your", "cock", "cures", "phase",
     "you", "don", "emo", "alert", "risk", "newcomer", "goddess", "hottie",
     "delivery", "teach", "me", "her", "the", "and", "for", "with", "gets",
-    "takes", "makes", "turns", "comes", "goes", "wants", "needs", "loves",
-    "fucks", "high", "falling", "love", "routine", "hungry", "busty",
+    "takes", "makes", "turns", "comes", "goes", "wants", "needs",
+    "fucks", "high", "falling", "routine", "hungry", "busty",
     "petite", "thick", "slim", "nasty", "horny", "naughty", "dirty",
+    // Anatomy / category terms that tube sites list as actor links (e.g. "Big Tits")
+    // Note: "love"/"loves"/"latina"/"ebony" are real performer surnames — excluded.
+    "tits", "ass", "boobs", "cock", "dick", "pussy", "anal", "milf",
+    "teen", "amateur", "blonde", "brunette", "asian",
+    "bbw", "mature", "lesbian", "squirt", "creampie", "facial", "bdsm",
+    "interracial", "gangbang", "threesome", "orgy", "fetish", "solo",
   ]);
 
   const videos = await db

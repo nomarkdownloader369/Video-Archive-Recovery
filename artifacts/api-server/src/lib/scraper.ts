@@ -261,6 +261,15 @@ function isRoleDescriptor(twoWordPhrase: string): boolean {
     .some((w) => ROLE_DESCRIPTOR_WORDS.has(w));
 }
 
+// Words that commonly begin scene titles rather than performer names in
+// bracket-prefixed GP titles (used in Pattern 1b below).
+const SCENE_TITLE_STARTERS = new Set([
+  "family", "step", "the", "a", "an", "my", "your", "our", "his", "her",
+  "their", "this", "that", "all", "every", "good", "bad", "big", "hot",
+  "sweet", "real", "true", "best", "secret", "no", "not", "open", "dirty",
+  "naughty", "wild", "stepdaughter", "stepmom", "stepsis", "stepsister",
+]);
+
 export function extractPerformersFromGpTitle(title: string): string[] {
   // Helper: from a text segment, collect the first 2 consecutive Title-Case words
   // as a single performer name.  Stops at the first word that doesn't begin with
@@ -286,56 +295,103 @@ export function extractPerformersFromGpTitle(title: string): string[] {
     return { name, wordsConsumed: consumed };
   };
 
-  // Pattern 1 & 2: em-dash separator present — existing reliable format
-  // "[...] Name1, Name2 – Video Title"  or  "Studio YY MM DD Name1 – Video Title"
-  let match = title.match(/\]\s*([^–—]+?)\s*(?:–|—)/);
-  if (!match) {
-    match = title.match(/^[\w]+(?:\s+\d{2}){3}\s+(.+?)\s*(?:–|—)/);
-  }
-  if (match) {
-    return match[1]
+  // Body-descriptor words that sometimes get appended after a real performer name
+  // in LegalPorno/PornBox-style titles, e.g. "Cindy Luna Petite – Scene Title".
+  // When the captured segment has exactly 3 words and the last word is one of
+  // these, we trim to the first 2 words to recover the real name.
+  const NAME_DESCRIPTOR_SUFFIXES = new Set([
+    "petite", "busty", "curvy", "slim", "thick", "skinny", "chubby",
+    "milf", "mature", "teen", "latina", "ebony", "asian", "blonde", "brunette",
+  ]);
+
+  // Shared helper: split on commas/ampersands and return trimmed name tokens.
+  // minLen=3 allows short real names like "Jai", "Gia", "Ivy".
+  const splitNames = (raw: string): string[] =>
+    raw
       .split(/[,&]/)
-      .map((n) => n.trim())
-      .filter((n) => n.length >= 4 && n.split(" ").length <= 3 && n.length <= 28);
-  }
+      .map((n) => {
+        n = n.trim();
+        const words = n.split(/\s+/);
+        // Trim trailing descriptor suffix from 3-word entries, e.g. "Cindy Luna Petite" → "Cindy Luna"
+        if (words.length === 3 && NAME_DESCRIPTOR_SUFFIXES.has(words[2].toLowerCase())) {
+          n = words.slice(0, 2).join(" ");
+        }
+        return n;
+      })
+      .filter((n) => n.length >= 3 && n.split(" ").length <= 3 && n.length <= 28);
 
-  // Pattern 3: no em-dash — "Studio YY MM DD [Descriptor?] Name1[, Name2] Title"
-  // Strip the leading "Studio YY MM DD " to isolate the performer+title portion.
-  const afterDate = title.replace(/^[\w]+\s+\d{2}\s+\d{2}\s+\d{2}\s+/, "");
-  if (!afterDate || afterDate === title) return [];
-
-  // If a comma or ampersand appears in the first 80 characters, treat them as
-  // multiple-performer separators (e.g. "Julia James, Laynee James Sari...").
-  if (/[,&]/.test(afterDate.slice(0, 80))) {
-    const segments = afterDate.slice(0, 80).split(/[,&]/);
-    const names = segments
-      .map((seg) => extractName(seg)?.name ?? null)
-      .filter((n): n is string => n !== null);
-    if (names.length > 0) return names;
-  }
-
-  // Single performer — extract the first 2 title-case words.
-  // If they look like a role descriptor (e.g. "Horny Boss"), skip past them
-  // and try the next 2 title-case words as the real performer name.
-  let remainder = afterDate;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const result = extractName(remainder);
-    if (!result) break;
-    if (!isRoleDescriptor(result.name)) {
-      return [result.name];
+  // Shared: apply extractName loop to a segment (for no-em-dash patterns).
+  const extractSingleFromSegment = (segment: string): string | null => {
+    let remainder = segment.trim();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = extractName(remainder);
+      if (!result) break;
+      if (!isRoleDescriptor(result.name)) return result.name;
+      const skipped = remainder.split(/\s+/).slice(result.wordsConsumed).join(" ");
+      if (!skipped || skipped === remainder) break;
+      remainder = skipped;
     }
-    // Skip past the descriptor words and try again
-    const skipped = remainder.trim().split(/\s+/).slice(result.wordsConsumed).join(" ");
-    if (!skipped || skipped === remainder) break;
-    remainder = skipped;
+    return null;
+  };
+
+  // ── Pattern 1: "[...] Name1, Name2 – Video Title" ─────────────────────────
+  // Reliable bracket+em-dash format used by most GP entries.
+  let match = title.match(/\]\s*([^–—]+?)\s*(?:–|—)/);
+
+  // ── Pattern 2: "Studio YY MM DD Name1 – Video Title" ─────────────────────
+  // Dated studio prefix without brackets.
+  if (!match) match = title.match(/^[\w]+(?:\s+\d{2}){3}\s+(.+?)\s*(?:–|—)/);
+
+  // ── Pattern 2b: "Studio – Name1, Name2 – Scene Title" ────────────────────
+  // Bare studio name (no brackets, no date) + double em-dash.
+  // e.g. "ModelMedia – Zhou Ning, Zhong Wanbing – MD-0361 …"
+  //      "BananaStudio – Li Zhixuan – JDSY-259 …"
+  if (!match) match = title.match(/^[^\[–—]{3,45}\s*(?:–|—)\s*([^–—]+?)\s*(?:–|—)/);
+
+  if (match) return splitNames(match[1], 3);
+
+  // ── Pattern 3: no em-dash — "Studio YY MM DD Name1[, Name2] Title" ────────
+  const afterDate = title.replace(/^[\w]+\s+\d{2}\s+\d{2}\s+\d{2}\s+/, "");
+  if (afterDate && afterDate !== title) {
+    if (/[,&]/.test(afterDate.slice(0, 80))) {
+      const names = afterDate.slice(0, 80).split(/[,&]/)
+        .map((seg) => extractName(seg)?.name ?? null)
+        .filter((n): n is string => n !== null);
+      if (names.length > 0) return names;
+    }
+    const single = extractSingleFromSegment(afterDate);
+    if (single) return [single];
+    return [];
   }
+
+  // ── Pattern 1b: "[Studio] Name Title" (bracket prefix, no em-dash) ────────
+  // e.g. "[TonightsGirlfriend] Brooke Wylde Submissive [24.10.14 / 720p]"
+  //      "[DaughterSwap] Scarlett Rose, Abby McCoy Bad Babes Confess …"
+  //      "[Brazzers] Alessa Savage My Stepdaughter's Secret"
+  const bracketMatch = title.match(/^\s*\[([^\]]*)\]\s+(.+)/);
+  if (bracketMatch) {
+    const afterBracket = bracketMatch[2].trim();
+    const firstWord = afterBracket.split(/\s+/)[0] ?? "";
+    // Skip if the title starts with a word that clearly begins a scene description.
+    if (!SCENE_TITLE_STARTERS.has(firstWord.toLowerCase())) {
+      if (/[,&]/.test(afterBracket.slice(0, 80))) {
+        const names = afterBracket.slice(0, 80).split(/[,&]/)
+          .map((seg) => extractName(seg)?.name ?? null)
+          .filter((n): n is string => n !== null);
+        if (names.length > 0) return names;
+      }
+      const single = extractSingleFromSegment(afterBracket);
+      if (single) return [single];
+    }
+  }
+
   return [];
 }
 
 export function dedupePerformerNames(names: string[]): string[] {
-  // Drop anything shorter than 4 characters — catches "Vi" (2), "Ali" (3), "Ivo" (3), etc.
-  // This filter runs BEFORE the early-return so single-element arrays like ["Ali"] are cleaned.
-  const filtered = names.filter((n) => n.trim().length >= 4);
+  // Drop anything shorter than 3 characters — catches "Vi" (2), "Bo" (2), etc.
+  // 3-char names like "Jai", "Gia", "Ivy" are real performer names and must be kept.
+  const filtered = names.filter((n) => n.trim().length >= 3);
   if (filtered.length < 2) return filtered;
   const sorted  = [...filtered].sort((a, b) => b.length - a.length);
   const accepted: string[] = [];
@@ -2357,6 +2413,26 @@ function extractFXPornHDMeta(html: string, title = ""): {
   // /star/ for other tube sites.
   // Fallback: parse the "[Studio] Performer1, Performer2 – Scene Title" title
   // pattern that fxpornhd.com uses consistently when no HTML links are found.
+
+  // fxpornhd.com tags many category terms (e.g. "Big Tits", "Amateur") as
+  // /actor/ links — these must be rejected so they don't pollute the performers list.
+  const FX_PERFORMER_BLOCKLIST = new Set([
+    "big tits", "big ass", "big boobs", "big cock", "big dick", "huge tits",
+    "natural tits", "fake tits", "small tits", "flat chest",
+    "teen", "teens", "amateur", "amateurs", "milf", "cougar", "mature",
+    "blonde", "brunette", "redhead", "black hair",
+    "latina", "asian", "ebony", "interracial", "bbc", "bbw",
+    "anal", "lesbian", "threesome", "gangbang", "bdsm", "bondage",
+    "fetish", "squirt", "squirting", "creampie", "facial", "cumshot",
+    "blowjob", "handjob", "footjob", "orgy", "solo", "masturbation",
+    "hd", "full hd", "4k", "1080p", "720p", "pov", "vr",
+    "taboo", "family", "incest", "onlyfans", "casting", "roleplay",
+    "stepmom", "stepsister", "stepbrother", "stepdad", "step mom",
+    "step sister", "step brother", "step dad",
+    "college", "uniform", "busty", "petite", "curvy", "chubby", "skinny",
+    "lingerie", "stockings", "tattoo", "tattoos", "piercing",
+  ]);
+
   const performers: string[] = [];
   const perfSeen = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2364,6 +2440,7 @@ function extractFXPornHDMeta(html: string, title = ""): {
     const name = $(el).attr("title")?.trim() || $(el).text().trim();
     if (!name || name.length < 3) return;
     if (name.split(" ").length > 3 || name.length > 28) return;
+    if (FX_PERFORMER_BLOCKLIST.has(name.toLowerCase())) return;
     if (!perfSeen.has(name)) { perfSeen.add(name); performers.push(name); }
   });
 
