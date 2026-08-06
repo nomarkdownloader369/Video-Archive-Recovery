@@ -120,16 +120,47 @@ function slugify(text: string): string {
 /**
  * Universal slug generator — shared by ALL scrapers.
  *
- * Strips [bracketed studio] prefixes and YY MM DD date stamps before
- * slugifying so the same video discovered by multiple sources (FXPornHD,
- * GalaxyPorn, HQPorner, etc.) produces an identical slug.  Cross-source
- * duplicates then merge via onConflictDoUpdate instead of creating separate
- * rows.  Neither "fx-" nor "gp-" source prefixes are added.
+ * Normalises the raw title through four ordered passes before slugifying:
+ *   a) Strip [bracketed] studio/tag prefixes
+ *   b) Strip date stamps (YY-MM-DD, YYYY-MM-DD, and space-separated variants)
+ *   c) Strip video quality keywords (1080p, 4K, HD, etc.)
+ *   d) Strip known unbracketed studio names that appear at the start of a title
+ *
+ * The result is identical for the same underlying scene regardless of which
+ * source indexed it, so cross-source duplicates merge via onConflictDoUpdate
+ * instead of creating separate rows.  No "fx-" / "gp-" source prefixes added.
  */
+
+/** Studios that appear un-bracketed at the start of raw titles. */
+const UNBRACKETED_STUDIO_PREFIXES = [
+  "BrattyMILF", "DadCrush", "FamilyTherapy", "SisLovesMe", "SexMex",
+  "PervMom", "PureTaboo", "Pure Taboo", "MissaX", "FamilyStrokes", "Family Strokes",
+  "BrattySis", "BrattyBros", "DaughterSwap", "Daughter Swap", "MyPervyFamily",
+  "My Pervy Family", "MomsTeachSex", "Moms Teach Sex", "MomSwap", "Mom Swap",
+  "AuntSwap", "Aunt Swap", "SisterSwap", "Sister Swap", "BFFS",
+  "HouseholdFantasy", "Household Fantasy", "WickedPictures", "Wicked Pictures",
+  "Nubiles", "TeamSkeet", "Team Skeet", "BangBros", "Bang Bros", "Brazzers",
+  "Reality Kings", "RealityKings", "Mofos", "Twistys", "Naughty America",
+  "NaughtyAmerica", "Vixen", "Blacked", "Tushy", "Deeper",
+];
+
+// Escape regex meta-chars and sort longest-first so "Family Strokes" matches
+// before "Family" if both were present.
+const _studioPrefixRe = new RegExp(
+  `^(?:${UNBRACKETED_STUDIO_PREFIXES
+    .slice()
+    .sort((a, b) => b.length - a.length)
+    .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})\\s*[-–—:]?\\s*`,
+  "i",
+);
+
 export function generateUnifiedSlug(rawTitle: string): string {
   const stripped = rawTitle
-    .replace(/\[.*?\]/g, "")                 // strip [bracketed] studio prefixes
-    .replace(/\b\d{2}\s\d{2}\s\d{2}\b/g, "") // strip YY MM DD date stamps
+    .replace(/\[.*?\]/g, "")                                   // a) [bracketed] tags
+    .replace(/\b\d{2,4}[-\s]\d{2}[-\s]\d{2}\b/g, "")          // b) date stamps
+    .replace(/\b(?:1080p|720p|480p|4k|2k|uhd|fhd|hd)\b/gi, "") // c) quality keywords
+    .replace(_studioPrefixRe, "")                               // d) unbracketed studios
     .trim();
   return slugify(stripped) || slugify(rawTitle) || `video-${Date.now()}`;
 }

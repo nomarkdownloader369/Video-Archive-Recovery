@@ -14,6 +14,7 @@ import {
   scrapeGalaxyPorn,
   scrapeFXPornHD,
   dedupePerformerNames,
+  generateUnifiedSlug,
 } from "./lib/scraper";
 
 // 7 empty/low-video categories seeded immediately on boot via targeted keyword search.
@@ -711,6 +712,91 @@ async function purgeFullHDPorn(): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// deduplicateExistingVideos — retroactive slug-based deduplication.
+//
+// Re-derives a normalised slug from each row's title using generateUnifiedSlug
+// (the same function the scrapers now use) and collapses any group that maps
+// to the SAME slug into a single winner (lowest id = oldest row).
+//
+// On merge:
+//   • tags and pornstars arrays are union-merged (no duplicates)
+//   • category, studio, quality_label, embed_url, thumbnail_url, etc. are
+//     kept from the winner (oldest row) — no schema columns named "mirrors"
+//     or "categories" exist, so those are not touched.
+//   • Duplicate rows are hard-deleted.
+// ---------------------------------------------------------------------------
+
+async function deduplicateExistingVideos(): Promise<void> {
+  const start = Date.now();
+  process.stdout.write("\n🔍 [DEDUP] Starting retroactive slug deduplication…\n");
+
+  // Fetch only the columns we need to decide and merge.
+  const rows = await db
+    .select({
+      id: videosTable.id,
+      title: videosTable.title,
+      tags: videosTable.tags,
+      pornstars: videosTable.pornstars,
+    })
+    .from(videosTable);
+
+  // Group rows by the re-derived unified slug.
+  const groups = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const key = generateUnifiedSlug(row.title);
+    const bucket = groups.get(key);
+    if (bucket) {
+      bucket.push(row);
+    } else {
+      groups.set(key, [row]);
+    }
+  }
+
+  let mergedGroups = 0;
+  let deletedRows = 0;
+
+  for (const bucket of groups.values()) {
+    if (bucket.length <= 1) continue;
+
+    // Sort ascending by id — lowest id = oldest, kept as winner.
+    bucket.sort((a, b) => a.id - b.id);
+    const [winner, ...dupes] = bucket;
+
+    // Union-merge tags and pornstars from all rows in the bucket.
+    const mergedTags = [
+      ...new Set(bucket.flatMap((r) => (r.tags as string[]) ?? [])),
+    ];
+    const mergedPornstars = dedupePerformerNames([
+      ...new Set(bucket.flatMap((r) => (r.pornstars as string[]) ?? [])),
+    ]);
+
+    // Update winner with merged arrays.
+    await db
+      .update(videosTable)
+      .set({ tags: mergedTags, pornstars: mergedPornstars })
+      .where(eq(videosTable.id, winner.id));
+
+    // Delete duplicates.
+    const dupeIds = dupes.map((r) => r.id);
+    await db.execute(
+      sql`DELETE FROM pf_videos WHERE id = ANY(${sql.raw(`ARRAY[${dupeIds.join(",")}]::int[]`)})`,
+    );
+
+    mergedGroups++;
+    deletedRows += dupes.length;
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  process.stdout.write(
+    `✅ [DEDUP] Done in ${elapsed}s — ${mergedGroups} duplicate groups merged, ${deletedRows} rows deleted.\n\n`,
+  );
+  logger.info(
+    { mergedGroups, deletedRows, elapsedSeconds: elapsed },
+    "deduplicateExistingVideos: complete",
+  );
+}
+
 async function writeBackup(): Promise<void> {
   try {
     const rows = await db.select().from(videosTable);
@@ -927,6 +1013,7 @@ app.listen(port, (err?: Error) => {
           .then(() => purgeFullHDPorn())
           .then(() => purgeAllFamilyPornHD())
           .then(() => purgeAllFXPornHD())
+          .then(() => deduplicateExistingVideos())
           .then(() => {
             startBackupInterval();
 
