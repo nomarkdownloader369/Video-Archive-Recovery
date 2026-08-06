@@ -153,12 +153,11 @@ async function autoPerformerRepair(): Promise<void> {
     const existing = new Set(video.pornstars.map((p: string) => p.toLowerCase()));
     const toAdd: string[] = [];
 
-    // ── Pass B: for GalaxyPorn rows, cross-match the full DB performer pool
-    // This catches performers whose names happen NOT to appear in the title segment
-    // (e.g. listed on the source page but not in the title) and were already indexed
-    // from another video.
-    const isGp = video.slug.startsWith("gp-");
-    if (isGp && performerList.length > 0) {
+    // ── Pass B (Source B): cross-match the full DB performer pool against
+    // the raw video title.  Only ALREADY-KNOWN performers (exact string match)
+    // are added — no guessing, no splitting, no heuristics.
+    // Applied to ALL published videos regardless of source.
+    if (performerList.length > 0) {
       const titleLower = video.title.toLowerCase();
       for (const name of performerList) {
         if (existing.has(name.toLowerCase())) continue;
@@ -331,18 +330,21 @@ async function purgeUnlistedPerformers(): Promise<void> {
       .filter(Boolean),
   );
 
-  // Trust all performers extracted from GalaxyPorn titles (gp- slug prefix).
+  // Trust all performers extracted from GalaxyPorn HTML links — these come
+  // from explicit /pornstar/ or /model/ anchor tags so they are reliable
+  // even when a performer only appears in a single indexed video.
+  // Identified by thumbnail URL domain since slugs no longer carry a source prefix.
   try {
     const gpRows = await db.execute(sql`
       SELECT DISTINCT unnest(${videosTable.pornstars}) AS name
       FROM ${videosTable}
-      WHERE slug LIKE 'gp-%' AND ${videosTable.status} = 'published'
+      WHERE thumbnail_url ILIKE '%galaxyporn.net%' AND ${videosTable.status} = 'published'
     `);
     for (const r of gpRows.rows as Array<{ name: string }>) {
       if (r.name?.trim()) validPerformers.add(r.name.trim());
     }
   } catch (gpErr) {
-    logger.warn({ gpErr }, "purgeUnlistedPerformers: could not load gp- performer trust set");
+    logger.warn({ gpErr }, "purgeUnlistedPerformers: could not load galaxyporn performer trust set");
   }
 
   if (validPerformers.size === 0) {
@@ -396,14 +398,16 @@ async function purgeUnlistedPerformers(): Promise<void> {
 async function purgeGarbageModels(): Promise<void> {
   const start = Date.now();
 
-  // Exact garbage words (case-insensitive) — any pornstars entry containing one
-  // of these as a whole word is removed immediately.
-  const GARBAGE_WORDS = new Set([
-    "big tits", "blowjobs", "stepmoms", "stepsis", "wimp", "massage",
-    "fun sized", "halloween", "memorial", "swingers", "let me", "can do",
-    "your cock", "shove my", "head", "teen", "amateur", "porn", "fuck",
-    "cum", "what your", "you don", "is to",
-  ]);
+  // Pure structural rules — NO word blacklists.
+  // A string fails if ANY of these three conditions are true:
+  //   1. More than 3 words       → full sentence / scene description
+  //   2. Contains any digit      → year, timestamp, serial number, not a name
+  //   3. Contains punctuation    → garbled title fragment (e.g. "What's This?")
+  //
+  // Allowed characters: letters (including accented), spaces, hyphens, and
+  // apostrophe-free names.  Real stage names like "Syren de Mer", "Andi James",
+  // "Eva Elfie" pass all three rules; corrupted entries like "Can Do Stepson",
+  // "Is To Fuck Her", "HD 1080p" are eliminated without a word list.
 
   const videos = await db
     .select({ id: videosTable.id, pornstars: videosTable.pornstars })
@@ -416,13 +420,13 @@ async function purgeGarbageModels(): Promise<void> {
     if (!video.pornstars || video.pornstars.length === 0) continue;
 
     const cleaned = (video.pornstars as string[]).filter((name) => {
-      const nameLower = name.trim().toLowerCase();
-      // Remove if name contains more than 3 words
-      if (name.trim().split(/\s+/).length > 3) return false;
-      // Remove if any garbage phrase matches as a whole substring
-      for (const garbage of GARBAGE_WORDS) {
-        if (nameLower === garbage || nameLower.includes(garbage)) return false;
-      }
+      const trimmed = name.trim();
+      // Rule 1: more than 3 words → sentence, not a name
+      if (trimmed.split(/\s+/).length > 3) return false;
+      // Rule 2: contains any digit → not a real performer name
+      if (/\d/.test(trimmed)) return false;
+      // Rule 3: contains punctuation → garbled title fragment
+      if (/["""''!?,:.;@#$%^&*()\[\]{}<>/\\|+=~`_]/.test(trimmed)) return false;
       return true;
     });
 
@@ -521,10 +525,11 @@ async function purgeFakePerformers(): Promise<void> {
 async function autoQualityRepair(): Promise<void> {
   const start = Date.now();
 
+  // Match GalaxyPorn rows by thumbnail domain — slugs no longer carry a source prefix.
   const gpVideos = await db
     .select({ id: videosTable.id, title: videosTable.title, quality_label: videosTable.quality_label })
     .from(videosTable)
-    .where(or(like(videosTable.slug, "gp-%"), like(videosTable.embed_url, "%galaxyporn.net%")));
+    .where(like(videosTable.thumbnail_url, "%galaxyporn.net%"));
 
   let corrected = 0;
   for (const video of gpVideos) {

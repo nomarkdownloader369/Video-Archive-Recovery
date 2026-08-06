@@ -117,6 +117,23 @@ function slugify(text: string): string {
     .slice(0, 120);
 }
 
+/**
+ * Universal slug generator — shared by ALL scrapers.
+ *
+ * Strips [bracketed studio] prefixes and YY MM DD date stamps before
+ * slugifying so the same video discovered by multiple sources (FXPornHD,
+ * GalaxyPorn, HQPorner, etc.) produces an identical slug.  Cross-source
+ * duplicates then merge via onConflictDoUpdate instead of creating separate
+ * rows.  Neither "fx-" nor "gp-" source prefixes are added.
+ */
+export function generateUnifiedSlug(rawTitle: string): string {
+  const stripped = rawTitle
+    .replace(/\[.*?\]/g, "")                 // strip [bracketed] studio prefixes
+    .replace(/\b\d{2}\s\d{2}\s\d{2}\b/g, "") // strip YY MM DD date stamps
+    .trim();
+  return slugify(stripped) || slugify(rawTitle) || `video-${Date.now()}`;
+}
+
 function parseDurationText(text: string): number {
   const t = text.trim();
   if (!t) return 0;
@@ -656,11 +673,13 @@ async function upsertBatchWithViewUpdate(videos: ScrapedVideo[]): Promise<void> 
         logger.info({ count: batch.length }, "upsertBatchWithViewUpdate: batch upserted");
       });
     } catch (err) {
-      // Slug-conflict fallback: insert each row individually so genuine new
-      // rows land while slug-colliding duplicates are silently skipped.
+      // Slug-conflict fallback: insert each row individually.
+      // When the same unified slug exists from a different source, merge the
+      // tags and pornstars arrays so cross-source data is combined without
+      // creating a duplicate row.
       logger.warn(
         { err, count: batch.length },
-        "upsertBatchWithViewUpdate: embed_url upsert failed — falling back to per-row slug-safe insert",
+        "upsertBatchWithViewUpdate: embed_url upsert failed — falling back to per-row slug-merge insert",
       );
       for (const v of batch) {
         try {
@@ -684,9 +703,18 @@ async function upsertBatchWithViewUpdate(videos: ScrapedVideo[]): Promise<void> 
               pornstars:        v.pornstars,
               status:           v.status,
             })
-            .onConflictDoNothing(); // skip any remaining slug or embed_url conflicts
+            .onConflictDoUpdate({
+              target: videosTable.slug,
+              set: {
+                // Merge tag and performer arrays from both sources — Postgres
+                // DISTINCT unnest guarantees no duplicates in the merged array.
+                tags:       sql`ARRAY(SELECT DISTINCT unnest(pf_videos.tags || excluded.tags))`,
+                pornstars:  sql`ARRAY(SELECT DISTINCT unnest(pf_videos.pornstars || excluded.pornstars))`,
+                updated_at: sql`NOW()`,
+              },
+            });
         } catch (innerErr) {
-          logger.error({ innerErr, slug: v.slug }, "upsertBatchWithViewUpdate: per-row insert also failed — buffering");
+          logger.error({ innerErr, slug: v.slug }, "upsertBatchWithViewUpdate: per-row slug-merge also failed — buffering");
           appendToBuffer([v]);
         }
       }
@@ -1788,7 +1816,7 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
           .replace(/^https?:\/\/[^/]+/, "")
           .replace(/^\//, "")
           .replace(/\/$/, "");
-        const rawSlug = `gp-${slugify(pathSlug || title)}`.slice(0, 120);
+        const rawSlug = generateUnifiedSlug(title).slice(0, 120);
         if (seenSlugs.has(rawSlug)) continue;
         seenSlugs.add(rawSlug);
 
@@ -2328,11 +2356,9 @@ function extractFXPornHDMeta(html: string, title = ""): {
   }
 
   // ── Performers ────────────────────────────────────────────────────────────
-  // Primary: HTML anchor links pointing to performer profile paths.
+  // STRICT SOURCE: HTML anchor links pointing to performer profile paths ONLY.
   // fxpornhd.com uses /actor/ — also handles /pornstar/, /model/, /actress/,
-  // /star/ for other tube sites.
-  // Fallback: parse the "[Studio] Performer1, Performer2 – Scene Title" title
-  // pattern that fxpornhd.com uses consistently when no HTML links are found.
+  // /star/ for other tube sites.  No title-splitting or guessing fallback.
 
   // fxpornhd.com tags many category terms (e.g. "Big Tits", "Amateur") as
   // /actor/ links — these must be rejected so they don't pollute the performers list.
@@ -2512,7 +2538,7 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         .replace(/^https?:\/\/[^/]+/, "")
         .replace(/^\//, "")
         .replace(/\/$/, "");
-      const rawSlug = `fx-${slugify(pathSlug || title)}`.slice(0, 120);
+      const rawSlug = generateUnifiedSlug(title).slice(0, 120);
       if (seenSlugs.has(rawSlug)) continue;
       seenSlugs.add(rawSlug);
 
