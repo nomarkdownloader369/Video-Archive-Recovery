@@ -383,6 +383,8 @@ interface ScrapedVideo {
   status: string;
   /** Internal — matched family keyword, used for studio fallback after detail-page enrichment. Not persisted. */
   _familyKeyword?: string | null;
+  /** Internal — original raw title before UI cleaning, used for studio-prefix matching and performer extraction. Not persisted. */
+  _rawTitle?: string;
 }
 
 function readBuffer(): ScrapedVideo[] {
