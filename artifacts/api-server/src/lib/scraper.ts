@@ -335,6 +335,26 @@ export function dedupePerformerNames(names: string[]): string[] {
   return accepted;
 }
 
+/**
+ * Cleans a raw scraped title for display in the UI.
+ *
+ * Pass 1: strip any bracketed studio prefix, e.g. "[SisLovesMe] " or "[BrazzersExxtra] ".
+ * Pass 2: strip any unbracketed studio name + the date stamp that follows it,
+ *         e.g. "GalaxyPorn 25 08 26 " or "JapanHDV 2025-08-26 " — universal,
+ *         matches any studio name format without hardcoding names.
+ * Pass 3: capitalize the first letter of the result.
+ *
+ * Guards: if both passes erase the whole string, returns the original raw title.
+ * Does NOT affect slug generation — only the `title` field stored in the DB.
+ */
+function cleanVisibleTitle(raw: string): string {
+  let t = raw
+    .replace(/^\[.*?\]\s*/g, "")
+    .replace(/^.*?\b\d{2,4}[-\s]\d{2}[-\s]\d{2}\s*/g, "");
+  if (!t) t = raw;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 // ---------------------------------------------------------------------------
 // Retry helper for DB operations
 // ---------------------------------------------------------------------------
@@ -586,9 +606,10 @@ function extractVideosFromListing(html: string): ScrapedVideo[] {
     const familyKeyword = detectFamilyKeyword(title, baseTags);
     if (familyKeyword) baseTags.push(familyKeyword, "family");
 
+    const cleanedTitle = cleanVisibleTitle(title);
     videos.push({
       slug,
-      title,
+      title: cleanedTitle,
       description: null,
       source_url: fullUrl,
       embed_url: fullUrl, // replaced after detail-page fetch
@@ -605,6 +626,7 @@ function extractVideosFromListing(html: string): ScrapedVideo[] {
       pornstars: [],
       status: "published",
       _familyKeyword: familyKeyword,
+      _rawTitle: title,
     });
   });
 
@@ -1854,10 +1876,11 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
         seenSlugs.add(rawSlug);
 
         const familyKeyword = detectFamilyKeyword(title, []);
+        const cleanedTitle  = cleanVisibleTitle(title);
 
         candidates.push({
           slug:             rawSlug,
-          title,
+          title:            cleanedTitle,
           description:      null,
           source_url:       href,
           embed_url:        href,   // overwritten from detail-page iframe below
@@ -1881,6 +1904,7 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
           pornstars:        [],
           status:           "published",
           _familyKeyword:   familyKeyword,
+          _rawTitle:        title,
         });
       }
 
@@ -1921,15 +1945,33 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
         const tagSet = new Set<string>(v.tags);
         for (const t of detailTags) tagSet.add(t);
 
-        // Performers come exclusively from explicit HTML links on the detail page.
-        // Dedup partial substrings before persisting.
-        const rawPornstars = performers;
+        // Performers: merge explicit detail-page HTML links with names safely
+        // extracted from the raw listing title using the date-to-hyphen pattern.
+        // e.g. "GalaxyPorn 25-08-26 Jane Doe - Scene Title" → "Jane Doe"
+        const GP_TABOO_WORDS = /\b(step|dad|mom|sister|brother|aunt|uncle|family|cure|phase|alert|fetish)\b/i;
+        const titlePerformers: string[] = [];
+        const rawForPerf = v._rawTitle ?? v.title;
+        const titlePerfMatch = rawForPerf.match(/\b\d{2,4}[-\s]\d{2}[-\s]\d{2}\s+(.*?)\s+-/);
+        if (titlePerfMatch?.[1]) {
+          const parts = titlePerfMatch[1].split(/,|\band\b|&/i);
+          for (const part of parts) {
+            const name  = part.trim();
+            const words = name.split(/\s+/).filter(Boolean);
+            if (words.length < 1 || words.length > 3) continue;
+            if (/[^a-zA-Z\s]/.test(name)) continue;  // zero numbers, zero punctuation
+            if (GP_TABOO_WORDS.test(name)) continue;
+            titlePerformers.push(name);
+          }
+        }
+
+        const rawPornstars = dedupePerformerNames([...performers, ...titlePerformers]);
         const mergedTags = Array.from(tagSet);
 
         // Studio taxonomy injection — same logic as FXPornHD so both scrapers
         // produce consistent category/tag data from bracketed title prefixes.
         // Dynamic fallback: unknown studios get their normalised name as a plain tag.
-        const gpStudioMatch = v.title.match(/^\[([^\]]+)\]/);
+        // Use _rawTitle because v.title has already been cleaned (no bracket prefix).
+        const gpStudioMatch = (v._rawTitle ?? v.title).match(/^\[([^\]]+)\]/);
         if (gpStudioMatch) {
           const gpStudioNorm  = gpStudioMatch[1].toLowerCase().replace(/[\s\-_]/g, "");
           const gpStudioEntry = UNIVERSAL_STUDIO_TAXONOMY[gpStudioNorm];
@@ -2576,10 +2618,11 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
       seenSlugs.add(rawSlug);
 
       const familyKeyword = detectFamilyKeyword(title, []);
+      const cleanedTitle  = cleanVisibleTitle(title);
 
       candidates.push({
         slug:             rawSlug,
-        title,
+        title:            cleanedTitle,
         description:      null,
         source_url:       href,
         embed_url:        href,   // overwritten by detail-page iframe below
@@ -2599,6 +2642,7 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         pornstars:        [],
         status:           "published",
         _familyKeyword:   familyKeyword,
+        _rawTitle:        title,
       });
     }
 
@@ -2627,7 +2671,7 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         durationSeconds: detailDur,
         tags:            detailTags,
         performers,
-      } = extractFXPornHDMeta(detailHtml, v.title);
+      } = extractFXPornHDMeta(detailHtml, v._rawTitle ?? v.title);
 
       if (!embedUrl) {
         logger.warn({ slug: v.slug }, "scrapeFXPornHD: no iframe embed URL found — skipping");
@@ -2654,7 +2698,7 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         tags:          mergedTags,
         quality_label: has4K ? "4K" : "1080p",
         // Always resolve category from studio prefix / title keywords — never "general"
-        category:      inferFxCategoryFromTitle(v.title, mergedTags),
+        category:      inferFxCategoryFromTitle(v._rawTitle ?? v.title, mergedTags),
         pornstars:     dedupePerformerNames(performers),
         studio:        v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
       };
