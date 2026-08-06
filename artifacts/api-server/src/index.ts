@@ -834,6 +834,62 @@ function startBackupInterval(): void {
 // DB diagnostic
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// cleanAllExistingTitles — retroactively clean dirty titles already in the DB
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies the universal two-pass title cleaning to every row in pf_videos:
+ *   1. Strip any bracketed studio prefix, e.g. "[SisLovesMe] "
+ *   2. Strip any unbracketed studio name + date stamp (dots, hyphens, or spaces),
+ *      e.g. "GalaxyPorn 25.08.26 " or "JapanHDV 2025-08-26 "
+ *   3. Capitalize the first letter.
+ * Only rows whose title actually changes are written to the DB.
+ * The slug is never touched — only the visible title field.
+ */
+function applyTitleCleaning(title: string): string {
+  let t = title
+    .replace(/^\[.*?\]\s*/g, "")
+    .replace(/^.*?\b\d{2,4}[-\s.]\d{2}[-\s.]\d{2}\s*/gi, "");
+  if (!t) t = title;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+async function cleanAllExistingTitles(): Promise<void> {
+  const BATCH = 200;
+  try {
+    const rows = await db
+      .select({ id: videosTable.id, title: videosTable.title })
+      .from(videosTable);
+
+    const dirty = rows
+      .map((r) => ({ id: r.id, cleaned: applyTitleCleaning(r.title) }))
+      .filter((r) => r.cleaned !== rows.find((x) => x.id === r.id)!.title);
+
+    process.stdout.write(
+      `\n🧹 [TITLE CLEANUP] ${dirty.length} of ${rows.length} existing titles need cleaning…\n`,
+    );
+
+    let done = 0;
+    for (let i = 0; i < dirty.length; i += BATCH) {
+      const chunk = dirty.slice(i, i + BATCH);
+      await Promise.all(
+        chunk.map((v) =>
+          db.update(videosTable).set({ title: v.cleaned }).where(eq(videosTable.id, v.id)),
+        ),
+      );
+      done += chunk.length;
+    }
+
+    process.stdout.write(
+      `🧹 [TITLE CLEANUP] ✅ Retroactively cleaned ${done} titles.\n\n`,
+    );
+    logger.info({ updated: done, total: rows.length }, "cleanAllExistingTitles: complete");
+  } catch (err) {
+    logger.error({ err }, "cleanAllExistingTitles: failed");
+  }
+}
+
 async function checkDatabase(): Promise<boolean> {
   const sep = "=".repeat(60);
   process.stdout.write(`\n${sep}\n  DATABASE STARTUP DIAGNOSTIC\n${sep}\n`);
@@ -988,6 +1044,9 @@ app.listen(port, (err?: Error) => {
 
         autoTagRepair().catch((err: unknown) =>
           logger.error({ err }, "autoTagRepair failed"),
+        );
+        cleanAllExistingTitles().catch((err: unknown) =>
+          logger.error({ err }, "cleanAllExistingTitles failed"),
         );
         // Run repair first, then cleanup sequentially so cleanup always
         // catches whatever repair injects (prevents the startup race where

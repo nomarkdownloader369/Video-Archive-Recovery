@@ -350,7 +350,7 @@ export function dedupePerformerNames(names: string[]): string[] {
 function cleanVisibleTitle(raw: string): string {
   let t = raw
     .replace(/^\[.*?\]\s*/g, "")
-    .replace(/^.*?\b\d{2,4}[-\s]\d{2}[-\s]\d{2}\s*/g, "");
+    .replace(/^.*?\b\d{2,4}[-\s.]\d{2}[-\s.]\d{2}\s*/gi, "");
   if (!t) t = raw;
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
@@ -1951,7 +1951,7 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
         const GP_TABOO_WORDS = /\b(step|dad|mom|sister|brother|aunt|uncle|family|cure|phase|alert|fetish)\b/i;
         const titlePerformers: string[] = [];
         const rawForPerf = v._rawTitle ?? v.title;
-        const titlePerfMatch = rawForPerf.match(/\b\d{2,4}[-\s]\d{2}[-\s]\d{2}\s+(.*?)\s+-/);
+        const titlePerfMatch = rawForPerf.match(/\b\d{2,4}[-\s.]\d{2}[-\s.]\d{2}\s+(.*?)\s+-/);
         if (titlePerfMatch?.[1]) {
           const parts = titlePerfMatch[1].split(/,|\band\b|&/i);
           for (const part of parts) {
