@@ -1081,8 +1081,8 @@ app.listen(port, (err?: Error) => {
               `   Studios: 28 whitelisted · 5 pages each\n` +
               `   Keywords: ${EMPTY_CATEGORY_KEYWORDS.length} terms · 5 pages each\n` +
               `   Performers: 33 stars · UNLIMITED pages\n` +
-              `   GalaxyPorn: ${EXPANDED_TABOO_QUERIES.length} taboo queries · 3 pages each · all concurrent\n` +
-              `   FXPornHD: unrestricted · 3 pages\n` +
+              `   GalaxyPorn: ${EXPANDED_TABOO_QUERIES.length} taboo queries · 3 pages each + default GP_SEARCHES · all concurrent\n` +
+              `   FXPornHD: unrestricted · 10 pages\n` +
               `   isScraping=true — heartbeat armed, container kept alive\n\n`,
             );
 
@@ -1093,7 +1093,8 @@ app.listen(port, (err?: Error) => {
               scrapeByKeywords(EMPTY_CATEGORY_KEYWORDS, 5),
               scrapeByPerformers(),
               ...EXPANDED_TABOO_QUERIES.map((q) => scrapeGalaxyPorn(3, [q])),
-              scrapeFXPornHD(3),
+              scrapeGalaxyPorn(),
+              scrapeFXPornHD(10),
             ])
               .then(() => seedWhitelistedPerformers())
               .then(() => {
