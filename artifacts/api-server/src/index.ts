@@ -1042,16 +1042,18 @@ app.listen(port, (err?: Error) => {
           return;
         }
 
-        autoTagRepair().catch((err: unknown) =>
-          logger.error({ err }, "autoTagRepair failed"),
-        );
-        cleanAllExistingTitles().catch((err: unknown) =>
-          logger.error({ err }, "cleanAllExistingTitles failed"),
-        );
+        const startupCleanup = Promise.all([
+          autoTagRepair().catch((err: unknown) => {
+            logger.error({ err }, "autoTagRepair failed");
+          }),
+          cleanAllExistingTitles().catch((err: unknown) => {
+            logger.error({ err }, "cleanAllExistingTitles failed");
+          }),
+        ]);
         // Run repair first, then cleanup sequentially so cleanup always
         // catches whatever repair injects (prevents the startup race where
         // cleanup finished before repair wrote its gp- performer additions).
-        autoPerformerRepair()
+        const performerCleanup = autoPerformerRepair()
           .then(() => autoPerformerCleanup())
           .then(() => autoPerformerSanityCleanup())
           .then(() => purgeGarbageModels())
@@ -1060,15 +1062,21 @@ app.listen(port, (err?: Error) => {
           .catch((err: unknown) =>
             logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup/purgeGarbage/purgeFake/purgeUnlisted failed"),
           );
-        autoQualityRepair().catch((err: unknown) =>
-          logger.error({ err }, "autoQualityRepair failed"),
-        );
+        const qualityRepair = autoQualityRepair().catch((err: unknown) => {
+          logger.error({ err }, "autoQualityRepair failed");
+        });
+        const startupCleanupComplete = Promise.all([
+          startupCleanup,
+          performerCleanup,
+          qualityRepair,
+        ]);
 
         // Restore → purge stale rows → arm backup interval → then start backfill.
         // The backfill is chained INSIDE the restore/purge promise so that
         // purgeAllFamilyPornHD() is guaranteed to finish before any scraper
         // begins inserting new rows (eliminates the delete-vs-insert race).
-        restoreFromBackupIfNeeded()
+        startupCleanupComplete
+          .then(() => restoreFromBackupIfNeeded())
           .then(() => purgeFullHDPorn())
           .then(() => purgeAllFamilyPornHD())
           .then(() => purgeAllFXPornHD())

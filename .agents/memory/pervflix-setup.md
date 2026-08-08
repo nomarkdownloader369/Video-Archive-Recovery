@@ -32,3 +32,16 @@ The original pervflix vite.config.ts has a `/api` proxy to `localhost:8080`. Whe
 - Frontend: `artifacts/pervflix: web`
 - API server: `artifacts/api-server: API Server`
 - Canvas/mockup: `artifacts/mockup-sandbox: Component Preview Server`
+
+## Validation and database startup
+
+Run the root `pnpm run typecheck` rather than the API package check in isolation; the
+root build first generates shared-library declarations required by API project
+references.
+
+**Why:** A clean import can have reachable PostgreSQL credentials but no `pf_videos`
+table yet, which makes the API intentionally disable scraping at boot.
+
+**How to apply:** After a fresh import or restored database, run
+`pnpm --filter @workspace/db run push` before restarting the API artifact. This creates
+the schema and allows the boot backfill to run.
