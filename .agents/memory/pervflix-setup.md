@@ -45,3 +45,15 @@ table yet, which makes the API intentionally disable scraping at boot.
 **How to apply:** After a fresh import or restored database, run
 `pnpm --filter @workspace/db run push` before restarting the API artifact. This creates
 the schema and allows the boot backfill to run.
+
+## Restore-before-purge startup order
+
+Any one-time database purge that is meant to remove bad restored rows must run after
+the empty-database backup restore and before title repair or scraper backfill.
+
+**Why:** Running the purge before restore sees an empty table and leaves malformed
+backup rows in place; running it after title repair can erase the evidence needed to
+identify rows for native re-scraping.
+
+**How to apply:** Chain startup as restore → corruption purge → cleanup/repair →
+stale-source purges → deduplication → scraper backfill.

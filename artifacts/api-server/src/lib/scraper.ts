@@ -348,11 +348,14 @@ export function dedupePerformerNames(names: string[]): string[] {
  * Does NOT affect slug generation — only the `title` field stored in the DB.
  */
 function cleanVisibleTitle(raw: string): string {
-  let t = raw
+  const cleaned = raw
     .replace(/^\[.*?\]\s*/g, "")
-    .replace(/^.*?\b\d{2,4}[-\s.]\d{2}[-\s.]\d{2}\s*/gi, "");
-  if (!t) t = raw;
-  return t.charAt(0).toUpperCase() + t.slice(1);
+    .replace(/^([A-Za-z0-9&]{2,20}(?:\s[A-Za-z0-9&]{2,20})?)\s+\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b\s*/i, "")
+    .replace(/\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b/gi, "")
+    .replace(/\/?\s*\[?(1080p|4k|720p)\]?/gi, "")
+    .replace(/^[-/\s\)]+|[-/\s\(]+$/g, "");
+
+  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : raw;
 }
 
 // ---------------------------------------------------------------------------
@@ -1948,7 +1951,7 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
         // Performers: merge explicit detail-page HTML links with names safely
         // extracted from the raw listing title using the date-to-hyphen pattern.
         // e.g. "GalaxyPorn 25-08-26 Jane Doe - Scene Title" → "Jane Doe"
-        const GP_TABOO_WORDS = /\b(step|dad|mom|sister|brother|aunt|uncle|family|cure|phase|alert|fetish)\b/i;
+        const GP_TABOO_WORDS = /(step|dad|mom|sister|brother|aunt|uncle|family|cure|phase|alert|fetish)/i;
         const titlePerformers: string[] = [];
         const rawForPerf = v._rawTitle ?? v.title;
         const titlePerfMatch = rawForPerf.match(/\b\d{2,4}[-\s.]\d{2}[-\s.]\d{2}\s+(.*?)\s+-/);

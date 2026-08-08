@@ -848,11 +848,14 @@ function startBackupInterval(): void {
  * The slug is never touched — only the visible title field.
  */
 function applyTitleCleaning(title: string): string {
-  let t = title
+  const cleaned = title
     .replace(/^\[.*?\]\s*/g, "")
-    .replace(/^.*?\b\d{2,4}[-\s.]\d{2}[-\s.]\d{2}\s*/gi, "");
-  if (!t) t = title;
-  return t.charAt(0).toUpperCase() + t.slice(1);
+    .replace(/^([A-Za-z0-9&]{2,20}(?:\s[A-Za-z0-9&]{2,20})?)\s+\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b\s*/i, "")
+    .replace(/\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b/gi, "")
+    .replace(/\/?\s*\[?(1080p|4k|720p)\]?/gi, "")
+    .replace(/^[-/\s\)]+|[-/\s\(]+$/g, "");
+
+  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : title;
 }
 
 async function cleanAllExistingTitles(): Promise<void> {
@@ -888,6 +891,25 @@ async function cleanAllExistingTitles(): Promise<void> {
   } catch (err) {
     logger.error({ err }, "cleanAllExistingTitles: failed");
   }
+}
+
+// deleteCorruptedTitles — one-time boot purge so bad rows are re-scraped natively
+async function deleteCorruptedTitles(): Promise<void> {
+  const deleted = await db
+    .delete(videosTable)
+    .where(
+      or(
+        like(videosTable.title, "/%"),
+        like(videosTable.title, ")%"),
+        sql`length(${videosTable.title}) < 10`,
+      ),
+    )
+    .returning({ id: videosTable.id });
+
+  process.stdout.write(
+    `\n🗑️ [CORRUPTED TITLES] Deleted ${deleted.length} corrupted video rows for native re-scrape.\n\n`,
+  );
+  logger.info({ deleted: deleted.length }, "deleteCorruptedTitles: complete");
 }
 
 async function checkDatabase(): Promise<boolean> {
@@ -1042,41 +1064,35 @@ app.listen(port, (err?: Error) => {
           return;
         }
 
-        const startupCleanup = Promise.all([
-          autoTagRepair().catch((err: unknown) => {
-            logger.error({ err }, "autoTagRepair failed");
-          }),
-          cleanAllExistingTitles().catch((err: unknown) => {
-            logger.error({ err }, "cleanAllExistingTitles failed");
-          }),
-        ]);
-        // Run repair first, then cleanup sequentially so cleanup always
-        // catches whatever repair injects (prevents the startup race where
-        // cleanup finished before repair wrote its gp- performer additions).
-        const performerCleanup = autoPerformerRepair()
-          .then(() => autoPerformerCleanup())
-          .then(() => autoPerformerSanityCleanup())
-          .then(() => purgeGarbageModels())
-          .then(() => purgeFakePerformers())
-          .then(() => purgeUnlistedPerformers())
-          .catch((err: unknown) =>
-            logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup/purgeGarbage/purgeFake/purgeUnlisted failed"),
-          );
-        const qualityRepair = autoQualityRepair().catch((err: unknown) => {
-          logger.error({ err }, "autoQualityRepair failed");
-        });
-        const startupCleanupComplete = Promise.all([
-          startupCleanup,
-          performerCleanup,
-          qualityRepair,
-        ]);
-
-        // Restore → purge stale rows → arm backup interval → then start backfill.
-        // The backfill is chained INSIDE the restore/purge promise so that
-        // purgeAllFamilyPornHD() is guaranteed to finish before any scraper
-        // begins inserting new rows (eliminates the delete-vs-insert race).
-        startupCleanupComplete
-          .then(() => restoreFromBackupIfNeeded())
+        // Restore first, then delete malformed rows, then run every cleanup pass.
+        // This guarantees corrupted rows from backup.json are deleted before
+        // any cleaner can alter their identifying prefix or before scrapers run.
+        const startupCleanupComplete = restoreFromBackupIfNeeded()
+          .then(() => deleteCorruptedTitles())
+          .then(() =>
+            Promise.all([
+              autoTagRepair().catch((err: unknown) => {
+                logger.error({ err }, "autoTagRepair failed");
+              }),
+              cleanAllExistingTitles().catch((err: unknown) => {
+                logger.error({ err }, "cleanAllExistingTitles failed");
+              }),
+              // Run repair first, then cleanup sequentially so cleanup always
+              // catches whatever repair injects.
+              autoPerformerRepair()
+                .then(() => autoPerformerCleanup())
+                .then(() => autoPerformerSanityCleanup())
+                .then(() => purgeGarbageModels())
+                .then(() => purgeFakePerformers())
+                .then(() => purgeUnlistedPerformers())
+                .catch((err: unknown) =>
+                  logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup/purgeGarbage/purgeFake/purgeUnlisted failed"),
+                ),
+              autoQualityRepair().catch((err: unknown) => {
+                logger.error({ err }, "autoQualityRepair failed");
+              }),
+            ]),
+          )
           .then(() => purgeFullHDPorn())
           .then(() => purgeAllFamilyPornHD())
           .then(() => purgeAllFXPornHD())
