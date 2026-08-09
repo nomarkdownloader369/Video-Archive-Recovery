@@ -118,24 +118,29 @@ async function autoTagRepair(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// autoPerformerRepair — title-match performer injection for gp- (GalaxyPorn) rows only
+// recoverMissingPerformers — title-match performer injection from the DB pool
 // ---------------------------------------------------------------------------
 
-async function autoPerformerRepair(): Promise<void> {
+async function recoverMissingPerformers(): Promise<void> {
   const start = Date.now();
 
   // 1. Collect all distinct performer names already present across the whole DB
-  //    (used for the secondary gp- DB-match pass)
+  //    (used as the in-memory pool for this recovery pass)
   const dbPerformers = await db.execute(sql`
     SELECT DISTINCT unnest(${videosTable.pornstars}) AS name
     FROM ${videosTable}
-    WHERE ${videosTable.status} = 'published' AND ${videosTable.pornstars} IS NOT NULL
+    WHERE ${videosTable.pornstars} IS NOT NULL
   `);
   const performerList = (dbPerformers.rows as Array<Record<string, unknown>>)
     .map((r) => r["name"] as string)
-    .filter((n) => Boolean(n) && n.trim().length >= 3);
+    .filter((n) => Boolean(n) && n.trim().length >= 3)
+    .map((n) => n.trim())
+    .filter((n, i, names) =>
+      names.findIndex((candidate) => candidate.toLowerCase() === n.toLowerCase()) === i,
+    )
+    .sort((a, b) => b.length - a.length);
 
-  // 2. Fetch ALL published videos — both HQporner and GalaxyPorn need title repair
+  // 2. Fetch every video row so no source/status is skipped during recovery.
   const allVideos = await db
     .select({
       id:        videosTable.id,
@@ -144,7 +149,6 @@ async function autoPerformerRepair(): Promise<void> {
       pornstars: videosTable.pornstars,
     })
     .from(videosTable)
-    .where(eq(videosTable.status, "published"));
 
   if (allVideos.length === 0) return;
 
@@ -199,7 +203,7 @@ async function autoPerformerRepair(): Promise<void> {
   );
   logger.info(
     { repaired: updates.length, total: allVideos.length, elapsedSeconds: elapsed },
-    "autoPerformerRepair: complete",
+    "recoverMissingPerformers: complete",
   );
 }
 
@@ -848,12 +852,12 @@ function startBackupInterval(): void {
  * The slug is never touched — only the visible title field.
  */
 function applyTitleCleaning(title: string): string {
-  const cleaned = title
-    .replace(/^\[.*?\]\s*/g, "")
-    .replace(/^([A-Za-z0-9&]{2,20}(?:\s[A-Za-z0-9&]{2,20})?)\s+\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b\s*/i, "")
-    .replace(/\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b/gi, "")
-    .replace(/\/?\s*\[?(1080p|4k|720p)\]?/gi, "")
-    .replace(/^[-/\s\)]+|[-/\s\(]+$/g, "");
+  let cleaned = title;
+  cleaned = cleaned.replace(/^\[.*?\]\s*/g, "");
+  cleaned = cleaned.replace(/\[?\s*(1080p|4k|720p|hd|uhd|fhd)\s*\]?/gi, "");
+  cleaned = cleaned.replace(/\[\s*\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\s*\]?/gi, "");
+  cleaned = cleaned.replace(/\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b/gi, "");
+  cleaned = cleaned.replace(/[-/\[\]\(\)\s]+$/g, "");
 
   return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : title;
 }
@@ -893,8 +897,8 @@ async function cleanAllExistingTitles(): Promise<void> {
   }
 }
 
-// deleteCorruptedTitles — one-time boot purge so bad rows are re-scraped natively
-async function deleteCorruptedTitles(): Promise<void> {
+// deleteCorruptedVideos — one-time boot purge so bad rows are re-scraped natively
+async function deleteCorruptedVideos(): Promise<void> {
   const deleted = await db
     .delete(videosTable)
     .where(
@@ -909,7 +913,7 @@ async function deleteCorruptedTitles(): Promise<void> {
   process.stdout.write(
     `\n🗑️ [CORRUPTED TITLES] Deleted ${deleted.length} corrupted video rows for native re-scrape.\n\n`,
   );
-  logger.info({ deleted: deleted.length }, "deleteCorruptedTitles: complete");
+  logger.info({ deleted: deleted.length }, "deleteCorruptedVideos: complete");
 }
 
 async function checkDatabase(): Promise<boolean> {
@@ -1068,31 +1072,32 @@ app.listen(port, (err?: Error) => {
         // This guarantees corrupted rows from backup.json are deleted before
         // any cleaner can alter their identifying prefix or before scrapers run.
         const startupCleanupComplete = restoreFromBackupIfNeeded()
-          .then(() => deleteCorruptedTitles())
-          .then(() =>
-            Promise.all([
-              autoTagRepair().catch((err: unknown) => {
-                logger.error({ err }, "autoTagRepair failed");
-              }),
-              cleanAllExistingTitles().catch((err: unknown) => {
-                logger.error({ err }, "cleanAllExistingTitles failed");
-              }),
-              // Run repair first, then cleanup sequentially so cleanup always
-              // catches whatever repair injects.
-              autoPerformerRepair()
-                .then(() => autoPerformerCleanup())
-                .then(() => autoPerformerSanityCleanup())
-                .then(() => purgeGarbageModels())
-                .then(() => purgeFakePerformers())
-                .then(() => purgeUnlistedPerformers())
-                .catch((err: unknown) =>
-                  logger.error({ err }, "autoPerformerRepair/Cleanup/SanityCleanup/purgeGarbage/purgeFake/purgeUnlisted failed"),
-                ),
-              autoQualityRepair().catch((err: unknown) => {
-                logger.error({ err }, "autoQualityRepair failed");
-              }),
-            ]),
-          )
+        .then(() => deleteCorruptedVideos())
+        .then(() => cleanAllExistingTitles())
+        .then(() => recoverMissingPerformers())
+        .then(() => {
+          // Re-fetch deleted rows immediately in the background.
+          void scrapeGalaxyPorn().catch((err: unknown) =>
+            logger.error({ err }, "Boot GalaxyPorn re-scrape failed"),
+          );
+
+          return Promise.all([
+            autoTagRepair().catch((err: unknown) => {
+              logger.error({ err }, "autoTagRepair failed");
+            }),
+            autoPerformerCleanup()
+              .then(() => autoPerformerSanityCleanup())
+              .then(() => purgeGarbageModels())
+              .then(() => purgeFakePerformers())
+              .then(() => purgeUnlistedPerformers())
+              .catch((err: unknown) =>
+                logger.error({ err }, "Performer cleanup/sanity/purge failed"),
+              ),
+            autoQualityRepair().catch((err: unknown) => {
+              logger.error({ err }, "autoQualityRepair failed");
+            }),
+          ]);
+        })
           .then(() => purgeFullHDPorn())
           .then(() => purgeAllFamilyPornHD())
           .then(() => purgeAllFXPornHD())
@@ -1117,7 +1122,6 @@ app.listen(port, (err?: Error) => {
               scrapeByKeywords(EMPTY_CATEGORY_KEYWORDS, 5),
               scrapeByPerformers(),
               ...EXPANDED_TABOO_QUERIES.map((q) => scrapeGalaxyPorn(3, [q])),
-              scrapeGalaxyPorn(),
               scrapeFXPornHD(10),
             ])
               .then(() => seedWhitelistedPerformers())

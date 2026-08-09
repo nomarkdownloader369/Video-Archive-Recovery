@@ -348,14 +348,14 @@ export function dedupePerformerNames(names: string[]): string[] {
  * Does NOT affect slug generation — only the `title` field stored in the DB.
  */
 function cleanVisibleTitle(raw: string): string {
-  const cleaned = raw
-    .replace(/^\[.*?\]\s*/g, "")
-    .replace(/^([A-Za-z0-9&]{2,20}(?:\s[A-Za-z0-9&]{2,20})?)\s+\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b\s*/i, "")
-    .replace(/\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b/gi, "")
-    .replace(/\/?\s*\[?(1080p|4k|720p)\]?/gi, "")
-    .replace(/^[-/\s\)]+|[-/\s\(]+$/g, "");
+  let title = raw;
+  title = title.replace(/^\[.*?\]\s*/g, "");
+  title = title.replace(/\[?\s*(1080p|4k|720p|hd|uhd|fhd)\s*\]?/gi, "");
+  title = title.replace(/\[\s*\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\s*\]?/gi, "");
+  title = title.replace(/\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b/gi, "");
+  title = title.replace(/[-/\[\]\(\)\s]+$/g, "");
 
-  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : raw;
+  return title ? title.charAt(0).toUpperCase() + title.slice(1) : raw;
 }
 
 // ---------------------------------------------------------------------------
@@ -1659,6 +1659,24 @@ const GP_BASE     = "https://galaxyporn.net";
 const GP_DELAY_MS = 600;
 const GP_SEARCHES = ["Taboo", "Missax"];
 
+async function loadPerformerPool(): Promise<string[]> {
+  const result = await db.execute(sql`
+    SELECT DISTINCT unnest(${videosTable.pornstars}) AS name
+    FROM ${videosTable}
+    WHERE ${videosTable.pornstars} IS NOT NULL
+  `);
+
+  return (result.rows as Array<Record<string, unknown>>)
+    .map((row) => row["name"] as string)
+    .filter((name) => Boolean(name) && name.trim().length >= 3)
+    .map((name) => name.trim())
+    .filter((name, index, names) =>
+      names.findIndex((candidate) => candidate.toLowerCase() === name.toLowerCase()) === index,
+    )
+    // Prefer full names before single-word names when both match a title.
+    .sort((a, b) => b.length - a.length);
+}
+
 /**
  * Extract the embed iframe src and metadata from a galaxyporn.net detail page.
  *
@@ -1763,6 +1781,7 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
     `\n[GALAXYPORN] Starting scrape — up to ${pagesCount} pages × ${queries.length} search terms\n`,
   );
 
+  const performerPool = await loadPerformerPool();
   const seenSlugs = new Set<string>();
   let totalSaved  = 0;
 
@@ -1948,24 +1967,15 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
         const tagSet = new Set<string>(v.tags);
         for (const t of detailTags) tagSet.add(t);
 
-        // Performers: merge explicit detail-page HTML links with names safely
-        // extracted from the raw listing title using the date-to-hyphen pattern.
-        // e.g. "GalaxyPorn 25-08-26 Jane Doe - Scene Title" → "Jane Doe"
-        const GP_TABOO_WORDS = /(step|dad|mom|sister|brother|aunt|uncle|family|cure|phase|alert|fetish)/i;
-        const titlePerformers: string[] = [];
-        const rawForPerf = v._rawTitle ?? v.title;
-        const titlePerfMatch = rawForPerf.match(/\b\d{2,4}[-\s.]\d{2}[-\s.]\d{2}\s+(.*?)\s+-/);
-        if (titlePerfMatch?.[1]) {
-          const parts = titlePerfMatch[1].split(/,|\band\b|&/i);
-          for (const part of parts) {
-            const name  = part.trim();
-            const words = name.split(/\s+/).filter(Boolean);
-            if (words.length < 1 || words.length > 3) continue;
-            if (/[^a-zA-Z\s]/.test(name)) continue;  // zero numbers, zero punctuation
-            if (GP_TABOO_WORDS.test(name)) continue;
-            titlePerformers.push(name);
-          }
-        }
+        // Performers: merge explicit detail-page links with exact matches from
+        // the in-memory DB pool. Never split a title to guess a performer.
+        const rawTitle = (v._rawTitle ?? v.title).toLowerCase();
+        const titlePerformers = performerPool.filter((name) => {
+          const nameLower = name.toLowerCase();
+          if (nameLower.includes(" ")) return rawTitle.includes(nameLower);
+          const escaped = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          return new RegExp(`\\b${escaped}\\b`).test(rawTitle);
+        });
 
         const rawPornstars = dedupePerformerNames([...performers, ...titlePerformers]);
         const mergedTags = Array.from(tagSet);
