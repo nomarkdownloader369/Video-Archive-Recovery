@@ -838,65 +838,6 @@ function startBackupInterval(): void {
 // DB diagnostic
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// cleanAllExistingTitles — retroactively clean dirty titles already in the DB
-// ---------------------------------------------------------------------------
-
-/**
- * Applies the universal two-pass title cleaning to every row in pf_videos:
- *   1. Strip any bracketed studio prefix, e.g. "[SisLovesMe] "
- *   2. Strip any unbracketed studio name + date stamp (dots, hyphens, or spaces),
- *      e.g. "GalaxyPorn 25.08.26 " or "JapanHDV 2025-08-26 "
- *   3. Capitalize the first letter.
- * Only rows whose title actually changes are written to the DB.
- * The slug is never touched — only the visible title field.
- */
-function applyTitleCleaning(title: string): string {
-  let cleaned = title;
-  cleaned = cleaned.replace(/^\[.*?\]\s*/g, "");
-  cleaned = cleaned.replace(/\[?\s*(1080p|4k|720p|hd|uhd|fhd)\s*\]?/gi, "");
-  cleaned = cleaned.replace(/\[\s*\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\s*\]?/gi, "");
-  cleaned = cleaned.replace(/\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b/gi, "");
-  cleaned = cleaned.replace(/[-/\[\]\(\)\s]+$/g, "");
-
-  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : title;
-}
-
-async function cleanAllExistingTitles(): Promise<void> {
-  const BATCH = 200;
-  try {
-    const rows = await db
-      .select({ id: videosTable.id, title: videosTable.title })
-      .from(videosTable);
-
-    const dirty = rows
-      .map((r) => ({ id: r.id, cleaned: applyTitleCleaning(r.title) }))
-      .filter((r) => r.cleaned !== rows.find((x) => x.id === r.id)!.title);
-
-    process.stdout.write(
-      `\n🧹 [TITLE CLEANUP] ${dirty.length} of ${rows.length} existing titles need cleaning…\n`,
-    );
-
-    let done = 0;
-    for (let i = 0; i < dirty.length; i += BATCH) {
-      const chunk = dirty.slice(i, i + BATCH);
-      await Promise.all(
-        chunk.map((v) =>
-          db.update(videosTable).set({ title: v.cleaned }).where(eq(videosTable.id, v.id)),
-        ),
-      );
-      done += chunk.length;
-    }
-
-    process.stdout.write(
-      `🧹 [TITLE CLEANUP] ✅ Retroactively cleaned ${done} titles.\n\n`,
-    );
-    logger.info({ updated: done, total: rows.length }, "cleanAllExistingTitles: complete");
-  } catch (err) {
-    logger.error({ err }, "cleanAllExistingTitles: failed");
-  }
-}
-
 // deleteCorruptedVideos — one-time boot purge so bad rows are re-scraped natively
 async function deleteCorruptedVideos(): Promise<void> {
   const deleted = await db
@@ -1068,12 +1009,10 @@ app.listen(port, (err?: Error) => {
           return;
         }
 
-        // Restore first, then delete malformed rows, then run every cleanup pass.
-        // This guarantees corrupted rows from backup.json are deleted before
-        // any cleaner can alter their identifying prefix or before scrapers run.
+        // Restore first, then delete malformed rows and run the remaining cleanup
+        // passes. Visible source titles are intentionally never rewritten.
         const startupCleanupComplete = restoreFromBackupIfNeeded()
         .then(() => deleteCorruptedVideos())
-        .then(() => cleanAllExistingTitles())
         .then(() => recoverMissingPerformers())
         .then(() => {
           // Re-fetch deleted rows immediately in the background.

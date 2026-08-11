@@ -336,26 +336,11 @@ export function dedupePerformerNames(names: string[]): string[] {
 }
 
 /**
- * Cleans a raw scraped title for display in the UI.
- *
- * Pass 1: strip any bracketed studio prefix, e.g. "[SisLovesMe] " or "[BrazzersExxtra] ".
- * Pass 2: strip any unbracketed studio name + the date stamp that follows it,
- *         e.g. "GalaxyPorn 25 08 26 " or "JapanHDV 2025-08-26 " — universal,
- *         matches any studio name format without hardcoding names.
- * Pass 3: capitalize the first letter of the result.
- *
- * Guards: if both passes erase the whole string, returns the original raw title.
- * Does NOT affect slug generation — only the `title` field stored in the DB.
+ * Preserve source-provided visible titles exactly, apart from surrounding
+ * whitespace. Slug normalization remains separate and must not affect `title`.
  */
-function cleanVisibleTitle(raw: string): string {
-  let title = raw;
-  title = title.replace(/^\[.*?\]\s*/g, "");
-  title = title.replace(/\[?\s*(1080p|4k|720p|hd|uhd|fhd)\s*\]?/gi, "");
-  title = title.replace(/\[\s*\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\s*\]?/gi, "");
-  title = title.replace(/\b\d{2,4}[-\s\.]\d{2}[-\s\.]\d{2}\b/gi, "");
-  title = title.replace(/[-/\[\]\(\)\s]+$/g, "");
-
-  return title ? title.charAt(0).toUpperCase() + title.slice(1) : raw;
+function cleanVisibleTitle(title: string): string {
+  return title.trim();
 }
 
 // ---------------------------------------------------------------------------
