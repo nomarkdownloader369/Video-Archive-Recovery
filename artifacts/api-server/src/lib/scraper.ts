@@ -1884,6 +1884,7 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
 
         const familyKeyword = detectFamilyKeyword(title, []);
         const cleanedTitle  = cleanVisibleTitle(title);
+        const precision     = applyStudioPrecisionTaxonomy(title);
 
         candidates.push({
           slug:             rawSlug,
@@ -1904,10 +1905,14 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
               initialTags.map((t) => t.toLowerCase()).includes("2160p");
             return (has4K ? "4K" : "1080p") as "4K" | "1080p";
           })(),
-          category:         familyKeyword ? "family" : "taboo",
+          category:         precision.category ?? (familyKeyword ? "family" : "taboo"),
           studio:           null,
           release_year:     simulateReleaseYear(),
-          tags:             familyKeyword ? [familyKeyword, "taboo"] : ["taboo"],
+          tags:             precision.matched
+            ? precision.tags
+            : familyKeyword
+              ? [familyKeyword, "taboo"]
+              : ["taboo"],
           pornstars:        [],
           status:           "published",
           _familyKeyword:   familyKeyword,
@@ -1987,9 +1992,11 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
           }
         }
 
+        const precision = applyStudioPrecisionTaxonomy(v._rawTitle ?? v.title, mergedTags);
+        const finalTags = precision.matched ? precision.tags : mergedTags;
         const titleLcQ = v.title.toLowerCase();
         const has4KDetail = titleLcQ.includes("4k") || titleLcQ.includes("2160p") ||
-          mergedTags.some((t) => t.toLowerCase() === "4k" || t.toLowerCase() === "2160p");
+          finalTags.some((t) => t.toLowerCase() === "4k" || t.toLowerCase() === "2160p");
         const enriched: ScrapedVideo = {
           ...v,
           embed_url:        embedUrl,
@@ -1997,11 +2004,12 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
           duration_text:    detailDur > 0
             ? `${Math.floor(detailDur / 60)}m ${detailDur % 60}s`
             : v.duration_text,
-          tags:          mergedTags,
+          tags:          finalTags,
           quality_label: has4KDetail ? "4K" : "1080p",
           // Deduplicate partial/substring names before persisting
           pornstars: dedupePerformerNames(rawPornstars),
           studio:    v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
+          category:   precision.category ?? v.category,
         };
 
         // onConflictDoUpdate so repeat runs refresh view counts
@@ -2033,6 +2041,71 @@ const FX_DELAY_MS = 600;
 // ---------------------------------------------------------------------------
 // Universal studio → category/tag map  (shared by FXPornHD + GalaxyPorn scrapers)
 // ---------------------------------------------------------------------------
+
+export type StudioPrecisionTaxonomyEntry = {
+  categories: string[];
+  tags: string[];
+};
+
+/**
+ * Strict mappings for studios whose prefixes and title keywords identify a
+ * precise content classification. Keys are normalised studio/title tokens.
+ * These entries take precedence over the broader universal taxonomy below.
+ */
+export const STUDIO_PRECISION_TAXONOMY: Record<string, StudioPrecisionTaxonomyEntry> = {
+  myfriendshotmom: { categories: ["MILF", "STEPMOM", "TABOO"], tags: ["mom", "milf", "stepmom", "taboo"] },
+  momlover:        { categories: ["MILF", "STEPMOM", "TABOO"], tags: ["mom", "milf", "stepmom", "taboo"] },
+  pervmom:         { categories: ["MILF", "STEPMOM", "TABOO"], tags: ["mom", "milf", "stepmom", "taboo"] },
+  mypervyfamily:   { categories: ["FAMILY", "TABOO"],             tags: ["family", "taboo"] },
+  familystrokes:   { categories: ["FAMILY", "TABOO"],             tags: ["family", "taboo"] },
+  familytherapy:   { categories: ["FAMILY", "TABOO"],             tags: ["family", "taboo"] },
+  sislovesme:      { categories: ["FAMILY", "TABOO", "STEP SISTER"], tags: ["stepsister", "family", "taboo"] },
+  stepsiblings:    { categories: ["FAMILY", "TABOO", "STEP SISTER"], tags: ["stepsister", "family", "taboo"] },
+  analmom:         { categories: ["ANAL", "MILF", "STEPMOM", "TABOO"], tags: ["anal", "milf", "stepmom", "taboo"] },
+  missax:          { categories: ["TABOO", "EROTIC", "DRAMA"],     tags: ["puretaboo", "missax", "taboo"] },
+  puretaboo:       { categories: ["TABOO", "EROTIC", "DRAMA"],     tags: ["puretaboo", "missax", "taboo"] },
+  onlyfans:        { categories: ["ONLYFANS", "HD"],              tags: ["onlyfans", "hd"] },
+  sexmex:          { categories: ["FAMILY", "TABOO", "STEPMOM"],  tags: ["sexmex", "stepmom", "taboo"] },
+};
+
+function normalizePrecisionToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Resolve a strict studio mapping from a bracket prefix first, then from a
+ * normalised title keyword. A matched entry intentionally replaces scraped
+ * tags so generic source tags cannot pollute the canonical classification.
+ */
+export function applyStudioPrecisionTaxonomy(
+  title: string,
+  existingTags: string[] = [],
+): StudioPrecisionTaxonomyEntry & { matched: boolean; category: string | null } {
+  const bracketMatch = title.match(/^\[([^\]]+)\]/);
+  const bracketToken = bracketMatch ? normalizePrecisionToken(bracketMatch[1]) : "";
+  const normalizedTitle = normalizePrecisionToken(title);
+  const matchedKey =
+    (bracketToken && STUDIO_PRECISION_TAXONOMY[bracketToken] ? bracketToken : "") ||
+    Object.keys(STUDIO_PRECISION_TAXONOMY).find((key) => normalizedTitle.includes(key)) ||
+    "";
+  const entry = STUDIO_PRECISION_TAXONOMY[matchedKey];
+
+  if (entry) {
+    return {
+      matched: true,
+      category: entry.categories[0] ?? null,
+      categories: entry.categories,
+      tags: [...entry.tags],
+    };
+  }
+
+  return {
+    matched: false,
+    category: null,
+    categories: [],
+    tags: existingTags,
+  };
+}
 
 /**
  * UNIVERSAL_STUDIO_TAXONOMY — single source-of-truth for all scrapers.
@@ -2203,6 +2276,9 @@ const UNIVERSAL_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: st
  *  4. "erotic" fallback        — never returns "general"
  */
 function inferFxCategoryFromTitle(title: string, tags: string[]): string {
+  const precision = applyStudioPrecisionTaxonomy(title, tags);
+  if (precision.matched && precision.category) return precision.category;
+
   // 1. Bracketed studio prefix → use taxonomy categories array
   const studioMatch = title.match(/^\[([^\]]+)\]/);
   if (studioMatch) {
@@ -2393,6 +2469,13 @@ function extractFXPornHDMeta(html: string, title = ""): {
         if (dynTag && !tagSeen.has(dynTag)) { tagSeen.add(dynTag); tags.push(dynTag); }
       }
     }
+  }
+
+  // Strict precision mappings replace generic source tags for known studios
+  // and title keywords, keeping only the requested canonical tags.
+  const precision = applyStudioPrecisionTaxonomy(title, tags);
+  if (precision.matched) {
+    tags.splice(0, tags.length, ...precision.tags);
   }
 
   // Step 3 — Title keyword classifiers (only when still no useful tags).
@@ -2617,6 +2700,7 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
 
       const familyKeyword = detectFamilyKeyword(title, []);
       const cleanedTitle  = cleanVisibleTitle(title);
+      const precision     = applyStudioPrecisionTaxonomy(title);
 
       candidates.push({
         slug:             rawSlug,
@@ -2633,10 +2717,14 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
           const lc = title.toLowerCase();
           return (lc.includes("4k") || lc.includes("2160p") ? "4K" : "1080p") as "4K" | "1080p";
         })(),
-        category:         familyKeyword ? "family" : inferFxCategoryFromTitle(title, []),
+        category:         precision.category ?? (familyKeyword ? "family" : inferFxCategoryFromTitle(title, [])),
         studio:           null,
         release_year:     simulateReleaseYear(),
-        tags:             familyKeyword ? [familyKeyword, "taboo"] : [],
+        tags:             precision.matched
+          ? precision.tags
+          : familyKeyword
+            ? [familyKeyword, "taboo"]
+            : [],
         pornstars:        [],
         status:           "published",
         _familyKeyword:   familyKeyword,
@@ -2682,9 +2770,11 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
       for (const t of detailTags) tagSet.add(t);
 
       const mergedTags = Array.from(tagSet);
+      const precision = applyStudioPrecisionTaxonomy(v._rawTitle ?? v.title, mergedTags);
+      const finalTags = precision.matched ? precision.tags : mergedTags;
       const titleLc    = v.title.toLowerCase();
       const has4K      = titleLc.includes("4k") || titleLc.includes("2160p") ||
-        mergedTags.some((t) => t.toLowerCase() === "4k" || t.toLowerCase() === "2160p");
+        finalTags.some((t) => t.toLowerCase() === "4k" || t.toLowerCase() === "2160p");
 
       const enriched: ScrapedVideo = {
         ...v,
@@ -2693,10 +2783,10 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         duration_text:    detailDur > 0
           ? `${Math.floor(detailDur / 60)}m ${detailDur % 60}s`
           : v.duration_text,
-        tags:          mergedTags,
+        tags:          finalTags,
         quality_label: has4K ? "4K" : "1080p",
         // Always resolve category from studio prefix / title keywords — never "general"
-        category:      inferFxCategoryFromTitle(v._rawTitle ?? v.title, mergedTags),
+        category:      precision.category ?? inferFxCategoryFromTitle(v._rawTitle ?? v.title, finalTags),
         pornstars:     dedupePerformerNames(performers),
         studio:        v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
       };

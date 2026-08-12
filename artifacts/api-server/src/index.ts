@@ -15,6 +15,7 @@ import {
   scrapeFXPornHD,
   dedupePerformerNames,
   generateUnifiedSlug,
+  applyStudioPrecisionTaxonomy,
 } from "./lib/scraper";
 
 // 7 empty/low-video categories seeded immediately on boot via targeted keyword search.
@@ -565,6 +566,44 @@ const BACKUP_PATH = path.resolve(import.meta.dirname, "../backup.json");
 const BACKUP_CHUNK_SIZE = 200;
 const BACKUP_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
+async function applyPrecisionTaxonomyToExistingVideos(): Promise<void> {
+  const rows = await db
+    .select({
+      id: videosTable.id,
+      title: videosTable.title,
+      tags: videosTable.tags,
+    })
+    .from(videosTable);
+
+  const updates: Array<{ id: number; category: string; tags: string[] }> = [];
+  for (const row of rows) {
+    const precision = applyStudioPrecisionTaxonomy(row.title, row.tags);
+    if (!precision.matched || !precision.category) continue;
+    updates.push({
+      id: row.id,
+      category: precision.category,
+      tags: precision.tags,
+    });
+  }
+
+  const CONCURRENCY = 50;
+  for (let i = 0; i < updates.length; i += CONCURRENCY) {
+    await Promise.all(
+      updates.slice(i, i + CONCURRENCY).map(({ id, category, tags }) =>
+        db
+          .update(videosTable)
+          .set({ category, tags })
+          .where(eq(videosTable.id, id)),
+      ),
+    );
+  }
+
+  logger.info(
+    { updated: updates.length, total: rows.length },
+    "applyPrecisionTaxonomyToExistingVideos: complete",
+  );
+}
+
 async function restoreFromBackupIfNeeded(): Promise<void> {
   if (!fs.existsSync(BACKUP_PATH)) {
     process.stdout.write(`[BACKUP] No backup.json found — skipping restore.\n`);
@@ -1012,6 +1051,7 @@ app.listen(port, (err?: Error) => {
         // Restore first, then delete malformed rows and run the remaining cleanup
         // passes. Visible source titles are intentionally never rewritten.
         const startupCleanupComplete = restoreFromBackupIfNeeded()
+        .then(() => applyPrecisionTaxonomyToExistingVideos())
         .then(() => deleteCorruptedVideos())
         .then(() => recoverMissingPerformers())
         .then(() => {
