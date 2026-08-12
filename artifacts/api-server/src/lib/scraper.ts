@@ -1646,9 +1646,15 @@ const GP_SEARCHES = ["Taboo", "Missax"];
 
 async function loadPerformerPool(): Promise<string[]> {
   const result = await db.execute(sql`
-    SELECT DISTINCT unnest(${videosTable.pornstars}) AS name
-    FROM ${videosTable}
-    WHERE ${videosTable.pornstars} IS NOT NULL
+    SELECT name
+    FROM (
+      SELECT unnest(${videosTable.pornstars}) AS name
+      FROM ${videosTable}
+      WHERE ${videosTable.pornstars} IS NOT NULL
+        AND ${videosTable.status} = 'published'
+    ) AS performer_names
+    GROUP BY name
+    HAVING COUNT(*) >= 2
   `);
 
   return (result.rows as Array<Record<string, unknown>>)
@@ -1660,6 +1666,22 @@ async function loadPerformerPool(): Promise<string[]> {
     )
     // Prefer full names before single-word names when both match a title.
     .sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Match only already-known performer names against a raw title. This is
+ * intentionally literal substring matching: no title splitting, token
+ * guessing, or generated performer names are permitted.
+ */
+export function matchKnownPerformersInTitle(
+  title: string,
+  performerPool: string[],
+): string[] {
+  const titleLower = title.toLowerCase();
+  return performerPool.filter((name) => {
+    const nameLower = name.trim().toLowerCase();
+    return nameLower.length >= 3 && titleLower.includes(nameLower);
+  });
 }
 
 /**
@@ -1960,12 +1982,7 @@ export async function scrapeGalaxyPorn(pagesCount = 3, queries: string[] = GP_SE
         // Performers: merge explicit detail-page links with exact matches from
         // the in-memory DB pool. Never split a title to guess a performer.
         const rawTitle = (v._rawTitle ?? v.title).toLowerCase();
-        const titlePerformers = performerPool.filter((name) => {
-          const nameLower = name.toLowerCase();
-          if (nameLower.includes(" ")) return rawTitle.includes(nameLower);
-          const escaped = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          return new RegExp(`\\b${escaped}\\b`).test(rawTitle);
-        });
+        const titlePerformers = matchKnownPerformersInTitle(rawTitle, performerPool);
 
         const rawPornstars = dedupePerformerNames([...performers, ...titlePerformers]);
         const mergedTags = Array.from(tagSet);
@@ -2791,24 +2808,15 @@ export async function scrapeFXPornHD(maxPages = 150): Promise<void> {
         studio:        v.studio ?? pickSimulatedStudio(v._familyKeyword ?? null),
       };
 
-      // ── Performer enrichment: DB pool scan + dynamic TitleCase discovery ──
-      const titleLowerFx = enriched.title.toLowerCase();
+      // ── Performer enrichment: verified DB pool scan only ──
       const perfSetFx    = new Set<string>(enriched.pornstars.map((p: string) => p.toLowerCase()));
 
-      // Pass 1 — match known DB performer names against the video title
-      if (fxPerformerPool.length > 0) {
-        for (const name of fxPerformerPool) {
-          if (perfSetFx.has(name.toLowerCase())) continue;
-          const nameLower = name.trim().toLowerCase();
-          const nameWords = nameLower.split(/\s+/);
-          const escaped   = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const inTitle   = nameWords.length === 1
-            ? new RegExp(`\\b${escaped}\\b`).test(titleLowerFx)
-            : titleLowerFx.includes(nameLower);
-          if (inTitle) {
-            enriched.pornstars = dedupePerformerNames([...enriched.pornstars, name]);
-            perfSetFx.add(name.toLowerCase());
-          }
+      // Pass 1 — add only literal matches from the verified DB performer pool.
+      const titlePerformersFx = matchKnownPerformersInTitle(enriched.title, fxPerformerPool);
+      for (const name of titlePerformersFx) {
+        if (!perfSetFx.has(name.toLowerCase())) {
+          enriched.pornstars = dedupePerformerNames([...enriched.pornstars, name]);
+          perfSetFx.add(name.toLowerCase());
         }
       }
 

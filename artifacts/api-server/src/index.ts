@@ -16,6 +16,7 @@ import {
   dedupePerformerNames,
   generateUnifiedSlug,
   applyStudioPrecisionTaxonomy,
+  matchKnownPerformersInTitle,
 } from "./lib/scraper";
 
 // 7 empty/low-video categories seeded immediately on boot via targeted keyword search.
@@ -128,9 +129,15 @@ async function recoverMissingPerformers(): Promise<void> {
   // 1. Collect all distinct performer names already present across the whole DB
   //    (used as the in-memory pool for this recovery pass)
   const dbPerformers = await db.execute(sql`
-    SELECT DISTINCT unnest(${videosTable.pornstars}) AS name
-    FROM ${videosTable}
-    WHERE ${videosTable.pornstars} IS NOT NULL
+    SELECT name
+    FROM (
+      SELECT unnest(${videosTable.pornstars}) AS name
+      FROM ${videosTable}
+      WHERE ${videosTable.pornstars} IS NOT NULL
+        AND ${videosTable.status} = 'published'
+    ) AS performer_names
+    GROUP BY name
+    HAVING COUNT(*) >= 2
   `);
   const performerList = (dbPerformers.rows as Array<Record<string, unknown>>)
     .map((r) => r["name"] as string)
@@ -157,29 +164,8 @@ async function recoverMissingPerformers(): Promise<void> {
 
   for (const video of allVideos) {
     const existing = new Set(video.pornstars.map((p: string) => p.toLowerCase()));
-    const toAdd: string[] = [];
-
-    // ── Pass B (Source B): cross-match the full DB performer pool against
-    // the raw video title.  Only ALREADY-KNOWN performers (exact string match)
-    // are added — no guessing, no splitting, no heuristics.
-    // Applied to ALL published videos regardless of source.
-    if (performerList.length > 0) {
-      const titleLower = video.title.toLowerCase();
-      for (const name of performerList) {
-        if (existing.has(name.toLowerCase())) continue;
-        // Word-boundary regex for single-word names; plain includes() for multi-word
-        const nameLower  = name.trim().toLowerCase();
-        const nameWords  = nameLower.split(/\s+/);
-        const escaped    = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const inTitle    = nameWords.length === 1
-          ? new RegExp(`\\b${escaped}\\b`).test(titleLower)
-          : titleLower.includes(nameLower);
-        if (inTitle) {
-          toAdd.push(name);
-          existing.add(nameLower);
-        }
-      }
-    }
+    const toAdd = matchKnownPerformersInTitle(video.title, performerList)
+      .filter((name) => !existing.has(name.toLowerCase()));
 
     if (toAdd.length > 0) {
       const merged          = [...new Set([...video.pornstars, ...toAdd])];
@@ -883,9 +869,10 @@ async function deleteCorruptedVideos(): Promise<void> {
     .delete(videosTable)
     .where(
       or(
-        like(videosTable.title, "/%"),
-        like(videosTable.title, ")%"),
-        sql`length(${videosTable.title}) < 10`,
+        sql`${videosTable.embed_url} IS NULL`,
+        sql`trim(${videosTable.embed_url}) = ''`,
+        sql`length(trim(${videosTable.title})) < 5`,
+        sql`trim(${videosTable.title}) ~ '^[[:punct:]]+$'`,
       ),
     )
     .returning({ id: videosTable.id });
