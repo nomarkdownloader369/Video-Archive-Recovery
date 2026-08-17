@@ -27,11 +27,21 @@ The original pervflix vite.config.ts has a `/api` proxy to `localhost:8080`. Whe
 
 `artifacts/api-server/backup.json` is the video index backup. On first boot with empty DB, it restores ~4,900+ rows automatically. Never delete it.
 
-## Managed workflow names
+## Managed workflow names and lifecycle
 
 - Frontend: `artifacts/pervflix: web`
-- API server: `artifacts/api-server: API Server`
+- API server: `artifacts/api-server: web`
 - Canvas/mockup: `artifacts/mockup-sandbox: Component Preview Server`
+
+Artifact-owned workflows cannot be removed through the normal workflow removal
+callback; they can be stopped, while the artifact registration remains.
+
+**Why:** Replit owns the lifecycle of artifact services so their preview routing
+and injected service configuration stay consistent.
+
+**How to apply:** Remove legacy workflows from `.replit`, stop unused
+artifact-owned services, and leave the active artifact workflows managed by
+Replit.
 
 ## Validation and database startup
 

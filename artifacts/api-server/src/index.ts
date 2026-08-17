@@ -1014,6 +1014,9 @@ app.get("/api/pf/admin/scrape-deep", (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 
 const AUTOPILOT_INTERVAL_MS = 4 * 60 * 60 * 1000;
+// Keep the expensive historical backfill opt-in. Normal API restarts should
+// only run cleanup and the calm 4-hour incremental autopilot.
+const ENABLE_BOOT_BACKFILL = process.env["ENABLE_BOOT_BACKFILL"] === "true";
 
 app.listen(port, (err?: Error) => {
   if (err) {
@@ -1042,10 +1045,13 @@ app.listen(port, (err?: Error) => {
         .then(() => deleteCorruptedVideos())
         .then(() => recoverMissingPerformers())
         .then(() => {
-          // Re-fetch deleted rows immediately in the background.
-          void scrapeGalaxyPorn().catch((err: unknown) =>
-            logger.error({ err }, "Boot GalaxyPorn re-scrape failed"),
-          );
+          // Re-fetch deleted rows immediately only when an operator explicitly
+          // opts into the expensive historical boot backfill.
+          if (ENABLE_BOOT_BACKFILL) {
+            void scrapeGalaxyPorn().catch((err: unknown) =>
+              logger.error({ err }, "Boot GalaxyPorn re-scrape failed"),
+            );
+          }
 
           return Promise.all([
             autoTagRepair().catch((err: unknown) => {
@@ -1070,6 +1076,14 @@ app.listen(port, (err?: Error) => {
           .then(() => deduplicateExistingVideos())
           .then(() => {
             startBackupInterval();
+
+            if (!ENABLE_BOOT_BACKFILL) {
+              process.stdout.write(
+                `\n🧘 BOOT SCRAPE DISABLED: Skipping the expensive historical backfill.\n` +
+                `   Incremental autopilot remains scheduled every 4 hours.\n\n`,
+              );
+              return;
+            }
 
             process.stdout.write(
               `\n🚀 BACKFILL: Launching studios · keywords · performers · GalaxyPorn · FXPornHD concurrently\n` +
@@ -1107,9 +1121,15 @@ app.listen(port, (err?: Error) => {
             logger.error({ err }, "Backup restore/purge/interval setup failed"),
           );
 
-        // Autopilot interval is armed immediately after DB check — it runs every
-        // 4 hours and does not need to wait for the initial backfill to finish.
+        // Autopilot interval is armed after DB cleanup and runs every 4 hours.
+        // Do not start a second cycle if a previous/manual scrape is active.
         setInterval(() => {
+          if (isScraping) {
+            logger.warn("Autopilot: skipping cycle because another scrape is active");
+            return;
+          }
+
+          isScraping = true;
           logger.info("Autopilot: triggering scheduled scrapeLatest + GalaxyPorn + FXPornHD");
           Promise.all([
             scrapeLatest(3),
@@ -1117,7 +1137,10 @@ app.listen(port, (err?: Error) => {
             scrapeFXPornHD(3),
           ])
             .then(() => seedWhitelistedPerformers())
-            .catch((err: unknown) => logger.error({ err }, "Autopilot multi-source scrape failed"));
+            .catch((err: unknown) => logger.error({ err }, "Autopilot multi-source scrape failed"))
+            .finally(() => {
+              isScraping = false;
+            });
         }, AUTOPILOT_INTERVAL_MS);
 
         logger.info(
