@@ -20,7 +20,7 @@ const CURATED_CATEGORIES = [
   "milf", "stepmom", "teen", "anal", "pov", "lesbian", "amateur", "blowjob",
   "big tits", "big ass", "creampie", "threesome", "interracial", "bbc", "public",
   "solo", "squirt", "deepthroat", "gangbang", "massage", "casting",
-  "family", "mature", "old/young", "femdom", "stepdad", "brunette", "blonde",
+  "family", "taboo", "mature", "old/young", "femdom", "stepdad", "step sister", "freeuse", "drama", "shoplyfter", "brunette", "blonde",
   "redhead", "stockings", "japanese", "ebony", "bbw", "college", "uniform",
   "onlyfans", "erotic", "fetish", "footjob",
 ] as const;
@@ -53,6 +53,9 @@ const CATEGORY_ALIASES: Record<string, string[]> = {
   erotic:       ["erotic", "erotica", "sensual", "romantic"],
   fetish:       ["fetish", "kink", "kinky", "latex", "leather"],
   footjob:      ["footjob", "foot job", "feet", "foot worship", "foot fetish"],
+  "step sister": ["step sister", "stepsister", "step-sister"],
+  freeuse:       ["freeuse", "free use"],
+  shoplyfter:    ["shoplyfter", "shoplifter"],
 };
 
 const ALIAS_TO_CANONICAL = new Map<string, string>();
@@ -74,6 +77,7 @@ router.get("/videos", async (req: Request, res: Response) => {
     studio,
     pornstar,
     tag,
+    hero,
   } = req.query as Record<string, string | undefined>;
 
   const pageNum = Math.max(1, parseInt(page ?? "1", 10) || 1);
@@ -128,6 +132,18 @@ router.get("/videos", async (req: Request, res: Response) => {
       sql`EXISTS (
         SELECT 1 FROM unnest(${videosTable.tags}) AS t
         WHERE lower(t) = ${tagNorm}
+      )`,
+    );
+  }
+
+  if (hero === "taboo-family") {
+    conditions.push(
+      sql`(
+        lower(${videosTable.category}) IN ('family', 'taboo', 'stepmom', 'step sister', 'milf')
+        OR EXISTS (
+          SELECT 1 FROM unnest(${videosTable.tags}) AS t
+          WHERE lower(t) IN ('family', 'taboo', 'stepmom', 'stepsister', 'milf')
+        )
       )`,
     );
   }
@@ -294,8 +310,6 @@ const PERFORMER_WHITELIST_ROUTES: { name: string; slug: string }[] = [
   { name: "Sophia Deluxe",  slug: "sophia-deluxe"  },
 ];
 
-const PERFORMER_FALLBACK_PHOTO =
-  "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80";
 
 router.get("/browse/pornstars", async (req: Request, res: Response) => {
   // Fetch only the fields we need — avoids pulling full video rows
@@ -356,7 +370,7 @@ router.get("/browse/pornstars", async (req: Request, res: Response) => {
 
       const photo = topThumb
         ? `${BASE}/api/pf/thumb?url=${encodeURIComponent(topThumb)}`
-        : PERFORMER_FALLBACK_PHOTO;
+        : null;
 
       return {
         name,
@@ -373,9 +387,7 @@ router.get("/browse/pornstars", async (req: Request, res: Response) => {
   res.json({ data });
 });
 
-// Generic dark fallback served directly (no proxy) for zero-count categories.
-const CATEGORY_FALLBACK_PHOTO =
-  "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=600&q=80";
+const CATEGORY_FALLBACK_PHOTO = null;
 
 router.get("/browse/categories", async (req: Request, res: Response) => {
   const rows = await db.execute<{
