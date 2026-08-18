@@ -141,7 +141,9 @@ function sortVideos(items: CatalogVideo[], sort: string): CatalogVideo[] {
 }
 
 function baseUrl(req: Request): string {
-  return `${req.protocol}://${req.get("host")}`;
+  const protocol = String(req.headers["x-forwarded-proto"] ?? "http").split(",")[0];
+  const host = req.headers.host ?? "localhost";
+  return `${protocol}://${host}`;
 }
 
 const router = Router();
