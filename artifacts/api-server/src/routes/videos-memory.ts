@@ -30,18 +30,108 @@ const BACKUP_PATH = [
   path.resolve(import.meta.dirname, "../../backup.json"),
 ].find((candidate) => existsSync(candidate)) ??
   path.resolve(import.meta.dirname, "../../backup.json");
-const videos = loadBackup();
+let videos: CatalogVideo[];
 
 const CURATED_CATEGORIES = [
   "milf", "stepmom", "teen", "anal", "pov", "lesbian", "amateur", "blowjob",
   "big tits", "big ass", "creampie", "threesome", "interracial", "bbc", "public",
   "solo", "squirt", "deepthroat", "gangbang", "massage", "casting",
-  "family", "mature", "old/young", "femdom", "stepdad", "brunette", "blonde",
+  "family", "taboo", "mature", "old/young", "femdom", "stepdad", "step sister", "freeuse", "drama", "shoplyfter", "brunette", "blonde",
   "redhead", "stockings", "japanese", "ebony", "bbw", "college", "uniform",
   "onlyfans", "erotic", "fetish", "footjob",
 ] as const;
 
 const CURATED_SET = new Set<string>(CURATED_CATEGORIES);
+
+function normalizeStudio(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function taxonomyEntry(categories: string[], tags: string[]): { categories: string[]; tags: string[] } {
+  return { categories, tags };
+}
+
+const TABOO_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: string[] }> = {
+  missax: taxonomyEntry(["taboo", "erotic", "drama"], ["missax", "taboo", "erotic", "drama"]),
+  puretaboo: taxonomyEntry(["taboo", "erotic", "drama"], ["puretaboo", "taboo", "erotic", "drama"]),
+  sweetsinner: taxonomyEntry(["taboo", "erotic", "drama"], ["sweetsinner", "taboo", "erotic", "drama"]),
+  sexmex: taxonomyEntry(["family", "taboo", "stepmom"], ["sexmex", "family", "taboo", "stepmom"]),
+  mypervyfamily: taxonomyEntry(["family", "taboo", "stepmom", "milf"], ["mypervyfamily", "family", "taboo", "stepmom", "milf"]),
+  momcomesfirst: taxonomyEntry(["family", "taboo", "stepmom", "milf"], ["momcomesfirst", "family", "taboo", "stepmom", "milf"]),
+  momsteachsex: taxonomyEntry(["family", "taboo", "stepmom", "milf"], ["momsteachsex", "family", "taboo", "stepmom", "milf"]),
+  familystrokes: taxonomyEntry(["family", "taboo"], ["familystrokes", "family", "taboo"]),
+  familytherapy: taxonomyEntry(["family", "taboo"], ["familytherapy", "family", "taboo"]),
+  analtherapy: taxonomyEntry(["anal", "fetish"], ["analtherapy", "anal", "fetish"]),
+  sislovesme: taxonomyEntry(["family", "taboo", "step sister"], ["sislovesme", "family", "taboo", "stepsister"]),
+  dadcrush: taxonomyEntry(["family", "taboo", "pov"], ["dadcrush", "family", "taboo", "pov"]),
+  daughterswap: taxonomyEntry(["family", "taboo"], ["daughterswap", "family", "taboo"]),
+  swappz: taxonomyEntry(["family", "taboo"], ["swappz", "family", "taboo"]),
+  swappzsingles: taxonomyEntry(["family", "taboo"], ["swappzsingles", "family", "taboo"]),
+  freeuse: taxonomyEntry(["freeuse", "pov", "taboo"], ["freeuse", "pov", "taboo"]),
+  freeusemylf: taxonomyEntry(["freeuse", "pov", "milf", "taboo"], ["freeuse", "pov", "milf", "taboo"]),
+  pervnana: taxonomyEntry(["family", "taboo", "milf"], ["pervnana", "family", "taboo", "milf"]),
+  shoplyfter: taxonomyEntry(["shoplyfter", "fetish", "erotic"], ["shoplyfter", "fetish", "erotic"]),
+  shoplyftermylf: taxonomyEntry(["shoplyfter", "fetish", "milf"], ["shoplyfter", "fetish", "milf"]),
+  dickdrainers: taxonomyEntry(["anal", "fetish"], ["dickdrainers", "anal", "fetish"]),
+  throated: taxonomyEntry(["anal", "fetish"], ["throated", "anal", "fetish"]),
+  brattymilf: taxonomyEntry(["milf", "family", "taboo"], ["brattymilf", "milf", "family", "taboo"]),
+  momswap: taxonomyEntry(["family", "taboo", "milf"], ["momswap", "family", "taboo", "milf"]),
+  auntswap: taxonomyEntry(["family", "taboo", "milf"], ["auntswap", "family", "taboo", "milf"]),
+  householdfantasy: taxonomyEntry(["family", "taboo", "drama"], ["householdfantasy", "family", "taboo", "drama"]),
+  stepfampov: taxonomyEntry(["family", "taboo", "pov"], ["stepfampov", "family", "taboo", "pov"]),
+  stepsiblings: taxonomyEntry(["family", "taboo", "step sister"], ["stepsiblings", "family", "taboo", "stepsister"]),
+  brattysis: taxonomyEntry(["family", "taboo", "step sister"], ["brattysis", "family", "taboo", "stepsister"]),
+  momlover: taxonomyEntry(["milf", "stepmom", "taboo"], ["momlover", "milf", "stepmom", "taboo"]),
+  mydirtyuncle: taxonomyEntry(["family", "taboo"], ["mydirtyuncle", "family", "taboo"]),
+  myfriendshotmom: taxonomyEntry(["milf", "stepmom", "taboo"], ["myfriendshotmom", "milf", "stepmom", "taboo"]),
+  mysistershotfriend: taxonomyEntry(["family", "taboo", "step sister"], ["mysistershotfriend", "family", "taboo", "stepsister"]),
+  myfirstsexteacher: taxonomyEntry(["erotic", "drama"], ["myfirstsexteacher", "erotic", "drama"]),
+  naughtyoffice: taxonomyEntry(["erotic", "drama"], ["naughtyoffice", "erotic", "drama"]),
+  housewife1on1: taxonomyEntry(["erotic", "milf"], ["housewife1on1", "erotic", "milf"]),
+  seducedbyacougar: taxonomyEntry(["erotic", "milf", "drama"], ["seducedbyacougar", "erotic", "milf", "drama"]),
+  baddaddypov: taxonomyEntry(["family", "taboo", "pov"], ["baddaddypov", "family", "taboo", "pov"]),
+  stepsiblingscaught: taxonomyEntry(["family", "taboo", "step sister"], ["stepsiblingscaught", "family", "taboo", "stepsister"]),
+  stepmomlessons: taxonomyEntry(["family", "taboo", "stepmom", "milf"], ["stepmomlessons", "family", "taboo", "stepmom", "milf"]),
+  stepdaughterfantasy: taxonomyEntry(["family", "taboo"], ["stepdaughterfantasy", "family", "taboo"]),
+  themomnextdoor: taxonomyEntry(["family", "taboo", "stepmom", "milf"], ["themomnextdoor", "family", "taboo", "stepmom", "milf"]),
+  stepbrotherfantasy: taxonomyEntry(["family", "taboo"], ["stepbrotherfantasy", "family", "taboo"]),
+  myfamilypies: taxonomyEntry(["family", "taboo"], ["myfamilypies", "family", "taboo"]),
+  momshoot: taxonomyEntry(["family", "taboo", "milf"], ["momshoot", "family", "taboo", "milf"]),
+  taboopov: taxonomyEntry(["taboo", "pov"], ["taboopov", "taboo", "pov"]),
+  sinfulfamily: taxonomyEntry(["family", "taboo"], ["sinfulfamily", "family", "taboo"]),
+  familyscrew: taxonomyEntry(["family", "taboo"], ["familyscrew", "family", "taboo"]),
+  sistertrick: taxonomyEntry(["family", "taboo", "step sister"], ["sistertrick", "family", "taboo", "stepsister"]),
+  stepbropov: taxonomyEntry(["family", "taboo", "pov"], ["stepbropov", "family", "taboo", "pov"]),
+  stepsispov: taxonomyEntry(["family", "taboo", "step sister", "pov"], ["stepsispov", "family", "taboo", "stepsister", "pov"]),
+  stepaunt: taxonomyEntry(["family", "taboo"], ["stepaunt", "family", "taboo"]),
+  stepcousin: taxonomyEntry(["family", "taboo"], ["stepcousin", "family", "taboo"]),
+  inthefamily: taxonomyEntry(["family", "taboo"], ["inthefamily", "family", "taboo"]),
+  forbiddenfamily: taxonomyEntry(["family", "taboo"], ["forbiddenfamily", "family", "taboo"]),
+  darktaboo: taxonomyEntry(["taboo", "drama"], ["darktaboo", "taboo", "drama"]),
+  tabooheat: taxonomyEntry(["taboo", "erotic"], ["tabooheat", "taboo", "erotic"]),
+  fostertapes: taxonomyEntry(["family", "taboo", "drama"], ["fostertapes", "family", "taboo", "drama"]),
+  brattamer: taxonomyEntry(["fetish", "taboo"], ["brattamer", "fetish", "taboo"]),
+  youngbusty: taxonomyEntry(["erotic"], ["youngbusty", "erotic"]),
+  legalporno: taxonomyEntry(["erotic", "drama"], ["legalporno", "erotic", "drama"]),
+  analvids: taxonomyEntry(["anal"], ["analvids", "anal"]),
+};
+
+function applyBackupTaxonomy(video: CatalogVideo): CatalogVideo {
+  const studioKey = video.studio ? normalizeStudio(video.studio) : "";
+  const titleKey = normalizeStudio(video.title);
+  const taxonomy = TABOO_STUDIO_TAXONOMY[studioKey] ??
+    Object.entries(TABOO_STUDIO_TAXONOMY).find(([key]) => titleKey.includes(key))?.[1];
+  const tags = [...new Set((video.tags ?? []).map((tag) => tag.toLowerCase()))];
+  if (!taxonomy) return { ...video, tags };
+  return {
+    ...video,
+    category: taxonomy.categories[0],
+    tags: [...new Set([...taxonomy.tags, ...tags])],
+  };
+}
+
+videos = loadBackup().map(applyBackupTaxonomy);
+
 const CATEGORY_ALIASES: Record<string, string[]> = {
   stepmom: ["stepmom", "step-mom", "step mom", "mom", "mommy"],
   stepdad: ["stepdad", "step-dad", "step dad", "dad"],
@@ -65,6 +155,9 @@ const CATEGORY_ALIASES: Record<string, string[]> = {
   erotic: ["erotic", "erotica", "sensual", "romantic"],
   fetish: ["fetish", "kink", "kinky", "latex", "leather"],
   footjob: ["footjob", "foot job", "feet", "foot worship", "foot fetish"],
+  "step sister": ["step sister", "stepsister", "step-sister"],
+  freeuse: ["freeuse", "free use"],
+  shoplyfter: ["shoplyfter", "shoplifter"],
 };
 const ALIAS_TO_CANONICAL = new Map<string, string>();
 for (const [canonical, aliases] of Object.entries(CATEGORY_ALIASES)) {
@@ -73,10 +166,7 @@ for (const [canonical, aliases] of Object.entries(CATEGORY_ALIASES)) {
   }
 }
 
-const CATEGORY_FALLBACK_PHOTO =
-  "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=600&q=80";
-const PERFORMER_FALLBACK_PHOTO =
-  "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80";
+const CATEGORY_FALLBACK_PHOTO = null;
 
 function loadBackup(): CatalogVideo[] {
   const parsed = JSON.parse(readFileSync(BACKUP_PATH, "utf8")) as unknown;
@@ -103,7 +193,7 @@ function decode(value: string): string {
 }
 
 function filteredVideos(req: Request): CatalogVideo[] {
-  const { q, category, studio, pornstar, tag } = req.query as Record<string, string | undefined>;
+  const { q, category, studio, pornstar, tag, hero } = req.query as Record<string, string | undefined>;
   const qNorm = q?.trim().toLowerCase();
   const categoryNorm = normalize(category);
   const studioNorm = normalize(studio);
@@ -117,6 +207,11 @@ function filteredVideos(req: Request): CatalogVideo[] {
     if (studioNorm && (video.studio ?? "").toLowerCase() !== studioNorm) return false;
     if (pornstarNorm && !video.pornstars.some((name) => name.toLowerCase() === decode(pornstarNorm))) return false;
     if (tagNorm && !video.tags.some((value) => value.toLowerCase() === tagNorm)) return false;
+    if (hero === "taboo-family") {
+      const familyTags = new Set(["family", "taboo", "stepmom", "stepsister", "milf"]);
+      const category = (video.category ?? "").toLowerCase();
+      if (!familyTags.has(category) && !video.tags.some((value) => familyTags.has(value.toLowerCase()))) return false;
+    }
     return true;
   });
 }
@@ -261,7 +356,7 @@ router.get("/browse/pornstars", (req: Request, res: Response) => {
       total_views: entry.total_views,
       photo: entry.topThumbnail
         ? `${base}/api/pf/thumb?url=${encodeURIComponent(entry.topThumbnail)}`
-        : PERFORMER_FALLBACK_PHOTO,
+        : null,
     }))
     .sort((a, b) => b.video_count - a.video_count || a.name.localeCompare(b.name))
     .slice(0, 349);
@@ -270,7 +365,7 @@ router.get("/browse/pornstars", (req: Request, res: Response) => {
 });
 
 router.get("/browse/categories", (req: Request, res: Response) => {
-  const aggregate = new Map<string, { video_count: number; thumbnails: string[] }>();
+  const aggregate = new Map<string, { video_count: number; thumbnails: { url: string; views: number }[] }>();
   for (const video of videos) {
     if (video.status !== "published") continue;
     const labels = [video.category ?? "", ...video.tags]
@@ -281,7 +376,7 @@ router.get("/browse/categories", (req: Request, res: Response) => {
     for (const label of new Set(labels)) {
       const existing = aggregate.get(label) ?? { video_count: 0, thumbnails: [] };
       existing.video_count += 1;
-      if (existing.thumbnails.length < 20) existing.thumbnails.push(video.thumbnail_url);
+      existing.thumbnails.push({ url: video.thumbnail_url, views: video.views ?? 0 });
       aggregate.set(label, existing);
     }
   }
@@ -292,7 +387,11 @@ router.get("/browse/categories", (req: Request, res: Response) => {
     .sort((a, b) => (aggregate.get(b)?.video_count ?? 0) - (aggregate.get(a)?.video_count ?? 0))
     .map((name) => {
       const row = aggregate.get(name);
-      const thumbnail = row?.thumbnails.find((candidate) => !usedThumbnails.has(candidate));
+      const thumbnail = row?.thumbnails
+        .slice()
+        .sort((a, b) => b.views - a.views)
+        .map((candidate) => candidate.url)
+        .find((candidate) => !usedThumbnails.has(candidate));
       if (thumbnail) usedThumbnails.add(thumbnail);
       return {
         name,

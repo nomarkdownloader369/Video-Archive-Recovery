@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { formatCompactNumber } from "@/lib/performerStats";
 import { SIDEBAR_PERFORMERS } from "@/lib/performers";
@@ -48,11 +49,6 @@ function getInitials(name: string): string {
   return name.split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase();
 }
 
-/** Lookup map for static Unsplash fallback portraits (used when API hasn't loaded yet) */
-const WHITELIST_PORTRAITS = new Map(
-  SIDEBAR_PERFORMERS.map((p) => [p.name.toLowerCase(), p.portrait])
-);
-
 /** Merge API performers with the curated whitelist, deduped by name */
 function mergePerformers(
   apiList: Array<{ name: string; slug: string; videoCount?: number; totalViews?: number; photo?: string | null }>,
@@ -65,18 +61,35 @@ function mergePerformers(
       slug: p.name.toLowerCase().replace(/\s+/g, "-"),
       videoCount: 0,
       totalViews: 0,
-      photo: p.portrait,   // static fallback while API hasn't loaded
+      photo: null,
     }));
   return [...apiList, ...extras];
 }
 
-/**
- * Resolve portrait for a performer card.
- * Priority: API-provided dynamic photo → static whitelist portrait → null (initials).
- */
-function resolvePortrait(p: { name: string; photo?: string | null }): string | null {
-  if (p.photo) return p.photo;
-  return WHITELIST_PORTRAITS.get(p.name.toLowerCase()) ?? null;
+function PerformerPortrait({ name, photo }: { name: string; photo?: string | null }) {
+  const [src, setSrc] = useState<string | null>(photo ?? null);
+
+  useEffect(() => {
+    setSrc(photo ?? null);
+  }, [photo]);
+
+  return (
+    <span className="relative grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-black ring-2 ring-primary/40 shadow-[0_0_6px_rgba(230,0,0,0.5)] transition-all duration-300 group-hover:scale-105 group-hover:ring-primary/80 group-hover:shadow-[0_0_10px_rgba(230,0,0,0.7)]">
+      {src ? (
+        <img
+          src={src}
+          alt={name}
+          className="h-full w-full object-cover object-top"
+          loading="lazy"
+          onError={() => setSrc(null)}
+        />
+      ) : (
+        <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-primary via-primary/70 to-primary/30 text-lg font-black text-white">
+          {getInitials(name)}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function BrowseAllPerformers() {
@@ -127,25 +140,7 @@ function BrowseAllPerformers() {
                 params={{ name: encodeURIComponent(p.name) }}
                 className="group flex flex-col items-center gap-2 rounded-sm border border-[color:var(--hairline)] bg-[color:var(--surface)] p-4 text-center transition-all duration-300 hover:border-primary/70 hover:shadow-[0_0_20px_rgba(230,0,0,0.35)]"
               >
-                {(() => {
-                  const portrait = resolvePortrait(p);
-                  return (
-                    <span className="relative grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-black ring-2 ring-primary/40 shadow-[0_0_6px_rgba(230,0,0,0.5)] transition-all duration-300 group-hover:scale-105 group-hover:ring-primary/80 group-hover:shadow-[0_0_10px_rgba(230,0,0,0.7)]">
-                      {portrait ? (
-                        <img
-                          src={portrait}
-                          alt={p.name}
-                          className="h-full w-full object-cover object-top"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-primary via-primary/70 to-primary/30 text-lg font-black text-white">
-                          {getInitials(p.name)}
-                        </span>
-                      )}
-                    </span>
-                  );
-                })()}
+                <PerformerPortrait name={p.name} photo={p.photo} />
                 <span className="line-clamp-2 text-xs font-semibold leading-tight text-foreground/85 group-hover:text-primary">
                   {p.name}
                 </span>
