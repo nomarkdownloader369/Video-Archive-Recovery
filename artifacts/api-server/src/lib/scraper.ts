@@ -2106,16 +2106,13 @@ export function applyStudioPrecisionTaxonomy(
     Object.keys(STUDIO_PRECISION_TAXONOMY).find((key) => normalizedTitle.includes(key)) ||
     "";
   const entry = STUDIO_PRECISION_TAXONOMY[matchedKey];
-  const universalKey = Object.keys(UNIVERSAL_STUDIO_TAXONOMY).find((key) => normalizedTitle.includes(key)) ?? "";
-  const universalEntry = UNIVERSAL_STUDIO_TAXONOMY[universalKey];
-  const resolvedEntry = entry ?? universalEntry;
 
-  if (resolvedEntry) {
+  if (entry) {
     return {
       matched: true,
-      category: resolvedEntry.categories[0] ?? null,
-      categories: resolvedEntry.categories,
-      tags: [...resolvedEntry.tags],
+      category: entry.categories[0] ?? null,
+      categories: entry.categories,
+      tags: [...entry.tags],
     };
   }
 
@@ -2285,96 +2282,6 @@ const UNIVERSAL_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: st
   newsensations:        { categories: ["erotic"],                                  tags: ["erotic", "hd", "big boobs"] },
   oyeloca:              { categories: ["erotic"],                                  tags: ["erotic", "latina", "amateur"] },
 };
-
-function expandedStudioEntry(
-  studio: string,
-  categories: string[],
-  tags: string[] = [],
-): StudioPrecisionTaxonomyEntry {
-  return {
-    categories,
-    tags: [...new Set([normalizePrecisionToken(studio), ...tags])],
-  };
-}
-
-function expandedStudioGroup(
-  studios: string[],
-  categories: string[],
-  tags: string[] = [],
-): [string, StudioPrecisionTaxonomyEntry][] {
-  return studios.map((studio) => [
-    normalizePrecisionToken(studio),
-    expandedStudioEntry(studio, categories, tags),
-  ]);
-}
-
-const EXPANDED_TABOO_STUDIO_TAXONOMY = Object.fromEntries([
-  ...expandedStudioGroup(
-    ["MissaX", "PureTaboo", "SweetSinner", "DarkTaboo", "TabooHeat", "LegalPorno"],
-    ["TABOO", "EROTIC", "DRAMA"],
-    ["taboo", "erotic", "drama"],
-  ),
-  ...expandedStudioGroup(
-    [
-      "SexMex", "MyPervyFamily", "MomComesFirst", "MomsTeachSex", "MomLover",
-      "MyFriendsHotMom", "Housewife1on1", "TheMomNextDoor", "StepMomLessons",
-    ],
-    ["FAMILY", "TABOO", "STEPMOM", "MILF"],
-    ["family", "taboo", "stepmom", "milf"],
-  ),
-  ...expandedStudioGroup(
-    ["FamilyStrokes", "FamilyTherapy", "Swappz", "SwappzSingles", "MyDirtyUncle", "MyFamilyPies", "MomShoot", "SinfulFamily", "FamilyScrew", "InTheFamily", "ForbiddenFamily"],
-    ["FAMILY", "TABOO"],
-    ["family", "taboo"],
-  ),
-  ...expandedStudioGroup(
-    ["AnalTherapy", "DickDrainers", "Throated", "AnalVids"],
-    ["ANAL", "FETISH"],
-    ["anal", "fetish"],
-  ),
-  ...expandedStudioGroup(
-    ["SisLovesMe", "BrattySis", "StepSiblings", "StepSiblingsCaught", "SisterTrick", "StepSisPOV"],
-    ["FAMILY", "TABOO", "STEP SISTER"],
-    ["family", "taboo", "stepsister"],
-  ),
-  ...expandedStudioGroup(
-    ["DadCrush", "DaughterSwap", "StepFamPOV", "BadDaddyPOV", "StepBroPOV"],
-    ["FAMILY", "TABOO", "POV"],
-    ["family", "taboo", "pov"],
-  ),
-  ...expandedStudioGroup(
-    ["Freeuse", "FreeuseMILF"],
-    ["FREEUSE", "POV", "TABOO"],
-    ["freeuse", "pov", "taboo"],
-  ),
-  ...expandedStudioGroup(
-    ["PervNana", "BrattyMILF", "MomSwap", "AuntSwap", "StepdaughterFantasy", "StepbrotherFantasy"],
-    ["FAMILY", "TABOO", "MILF"],
-    ["family", "taboo", "milf"],
-  ),
-  ...expandedStudioGroup(
-    ["Shoplyfter", "ShoplyfterMYLF", "BratTamer"],
-    ["FETISH", "EROTIC"],
-    ["fetish", "erotic"],
-  ),
-  ...expandedStudioGroup(
-    ["HouseholdFantasy", "FosterTapes"],
-    ["FAMILY", "TABOO", "DRAMA"],
-    ["family", "taboo", "drama"],
-  ),
-  ...expandedStudioGroup(
-    ["MyFirstSexTeacher", "NaughtyOffice", "SeducedByACougar", "YoungBusty"],
-    ["EROTIC", "DRAMA"],
-    ["erotic", "drama"],
-  ),
-  ...expandedStudioGroup(
-    ["StepAunt", "StepCousin"],
-    ["FAMILY", "TABOO"],
-    ["family", "taboo"],
-  ),
-]);
-
-Object.assign(UNIVERSAL_STUDIO_TAXONOMY, EXPANDED_TABOO_STUDIO_TAXONOMY);
 
 /**
  * Derive a meaningful primary category for an FXPornHD video.

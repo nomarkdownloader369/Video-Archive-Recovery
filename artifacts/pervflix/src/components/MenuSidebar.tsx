@@ -100,7 +100,15 @@ export function MenuSidebar({ trigger }: { trigger: ReactNode }) {
                 onClick={onClose}
                 className="group flex flex-col items-center gap-1.5"
               >
-                <SidebarPortrait name={p.name} photo={photoMap.get(p.name.toLowerCase())} />
+                {/* Portrait avatar — dynamic frame from the performer's top-viewed video */}
+                <span className="relative grid h-16 w-16 place-items-center overflow-hidden rounded-full bg-black ring-2 ring-primary/40 shadow-[0_0_6px_rgba(230,0,0,0.5)] transition-all duration-300 group-hover:scale-110 group-hover:ring-primary/80 group-hover:shadow-[0_0_10px_rgba(230,0,0,0.7)]">
+                  <img
+                    src={photoMap.get(p.name.toLowerCase()) ?? p.portrait}
+                    alt={p.name}
+                    className="h-full w-full object-cover object-top"
+                    loading="lazy"
+                  />
+                </span>
                 <span className="line-clamp-2 text-center text-[9px] font-semibold leading-tight text-foreground/75 transition-colors group-hover:text-primary">
                   {p.name}
                 </span>
@@ -121,28 +129,6 @@ export function MenuSidebar({ trigger }: { trigger: ReactNode }) {
         </div>
       </SheetContent>
     </Sheet>
-  );
-}
-
-function SidebarPortrait({ name, photo }: { name: string; photo?: string }) {
-  const [src, setSrc] = useState<string | null>(photo ?? null);
-
-  return (
-    <span className="relative grid h-16 w-16 place-items-center overflow-hidden rounded-full bg-black ring-2 ring-primary/40 shadow-[0_0_6px_rgba(230,0,0,0.5)] transition-all duration-300 group-hover:scale-110 group-hover:ring-primary/80 group-hover:shadow-[0_0_10px_rgba(230,0,0,0.7)]">
-      {src ? (
-        <img
-          src={src}
-          alt={name}
-          className="h-full w-full object-cover object-top"
-          loading="lazy"
-          onError={() => setSrc(null)}
-        />
-      ) : (
-        <span className="grid h-full w-full place-items-center bg-gradient-to-br from-primary via-primary/70 to-primary/30 text-xs font-black text-white">
-          {name.split(" ").map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase()}
-        </span>
-      )}
-    </span>
   );
 }
 
