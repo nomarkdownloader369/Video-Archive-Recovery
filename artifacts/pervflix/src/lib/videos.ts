@@ -73,13 +73,6 @@ export const CATEGORIES = [
   "Creampie",
   "Threesome",
   "Stepmom",
-  "Family",
-  "Taboo",
-  "Step Sister",
-  "Freeuse",
-  "Drama",
-  "Shoplyfter",
-  "Fetish",
   "Cosplay",
   "Public",
 ];

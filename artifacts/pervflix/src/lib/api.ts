@@ -118,7 +118,7 @@ export const api = {
   },
 
   listHero: async (): Promise<Video[]> => {
-    const res = await fetch(`${API_BASE}/videos?hero=taboo-family&sort=views&limit=5&page=1`);
+    const res = await fetch(`${API_BASE}/videos?sort=recent&limit=5&page=1`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = (await res.json()) as { data: DbVideo[] };
     return (json.data ?? []).map(mapDbVideo);
