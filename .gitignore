@@ -2,8 +2,6 @@
 
 # compiled output
 dist
-artifacts/pervflix/dist/
-artifacts/api-server/dist/
 tmp
 out-tsc
 *.tsbuildinfo
@@ -11,7 +9,7 @@ out-tsc
 .expo-shared
 
 # dependencies
-node_modules/
+node_modules
 
 # IDEs and editors
 /.idea
@@ -49,5 +47,3 @@ Thumbs.db
 # Replit
 .cache/
 .local/
-.vite/
-*.log

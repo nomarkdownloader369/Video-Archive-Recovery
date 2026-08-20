@@ -1,58 +1,45 @@
-# PervFlix
+# [Project name]
 
-A cinematic adult video streaming platform that aggregates studio-quality videos from curated sources, served through a dark-themed React interface.
+_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
 
-## Architecture
+## Run & Operate
 
-**Monorepo** — pnpm workspaces with three artifacts and shared libraries.
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm run typecheck` — full typecheck across all packages
+- `pnpm run build` — typecheck + build all packages
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
+- Required env: `DATABASE_URL` — Postgres connection string
 
-### Artifacts
-| Artifact | Path | Preview | Description |
-|---|---|---|---|
-| PervFlix Frontend | `artifacts/pervflix/` | `/` | React + Vite dark-themed streaming UI |
-| API Server | `artifacts/api-server/` | `/api/` | Express server — video index, scraping, DB |
-| Canvas (mockup sandbox) | `artifacts/mockup-sandbox/` | `/__mockup/` | Component prototyping sandbox |
+## Stack
 
-### Shared Libraries
-| Package | Path | Purpose |
-|---|---|---|
-| `@workspace/db` | `lib/db/` | Drizzle ORM + PostgreSQL schema (`pf_videos` table) |
-| `@workspace/api-zod` | `lib/api-zod/` | Zod schemas (generated via codegen) |
-| `@workspace/api-client-react` | `lib/api-client-react/` | React Query hooks (generated via codegen) |
-| `@workspace/api-spec` | `lib/api-spec/` | OpenAPI spec (`openapi.yaml`) + orval codegen config |
+- pnpm workspaces, Node.js 24, TypeScript 5.9
+- API: Express 5
+- DB: PostgreSQL + Drizzle ORM
+- Validation: Zod (`zod/v4`), `drizzle-zod`
+- API codegen: Orval (from OpenAPI spec)
+- Build: esbuild (CJS bundle)
 
-## Running the Project
+## Where things live
 
-Dependencies: `pnpm install`
+_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
 
-Workflows (managed automatically):
-- **`artifacts/pervflix: web`** — Frontend dev server (PORT 22141)
-- **`artifacts/api-server: web`** — Express API server (PORT 22729)
-- **`artifacts/mockup-sandbox: Component Preview Server`** — Canvas sandbox (PORT 23636)
+## Architecture decisions
 
-> Note: The old `API Server` and `PervFlix Frontend` workflows are legacy stubs — the managed artifact workflows above are the active ones.
+_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
 
-## Database
+## Product
 
-Uses Replit's built-in PostgreSQL. Schema: `lib/db/src/schema/videos.ts`
+_Describe the high-level user-facing capabilities of this app once they exist._
 
-Push schema changes: `pnpm --filter @workspace/db run push`
+## User preferences
 
-`artifacts/api-server/backup.json` — video index backup (~6,000+ rows). Auto-restores on empty DB at startup. **Do not delete.**
+_Populate as you build — explicit user instructions worth remembering across sessions._
 
-## API
+## Gotchas
 
-Base path: `/api/`  
-Health check: `GET /api/healthz`  
-OpenAPI spec: `lib/api-spec/openapi.yaml`  
-Codegen: `pnpm --filter @workspace/api-spec run codegen`
+_Populate as you build — sharp edges, "always run X before Y" rules._
 
-## Key Notes
+## Pointers
 
-- The API server scrapes HQporner, GalaxyPorn, and FXPornHD on a 4-hour autopilot schedule
-- The frontend proxies `/api` requests to the Express server via artifact routing
-- `SESSION_SECRET` env var required for session middleware
-
-## User Preferences
-
-- Keep the existing project structure — do not restructure or migrate
+- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

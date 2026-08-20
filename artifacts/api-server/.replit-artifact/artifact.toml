@@ -1,15 +1,13 @@
-kind = "web"
-previewPath = "/api/"
+kind = "api"
+previewPath = "/api" # TODO - should be excluded from preview in the first place
 title = "API Server"
-description = "Express API server for PervFlix — serves video data, handles scraping from HQporner and GalaxyPorn, and manages the PostgreSQL video index."
 version = "1.0.0"
-id = "artifacts/api-server"
-router = "path"
+id = "3B4_FFSkEVBkAeYMFRJ2e"
 
 [[services]]
-name = "web"
-paths = [ "/api/" ]
-localPort = 22729
+localPort = 8080
+name = "API Server"
+paths = ["/api"]
 
 [services.development]
 run = "pnpm --filter @workspace/api-server run dev"
@@ -23,14 +21,12 @@ args = ["pnpm", "--filter", "@workspace/api-server", "run", "build"]
 NODE_ENV = "production"
 
 [services.production.run]
+# we don't run through pnpm to make startup faster in production
 args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 
 [services.production.run.env]
+PORT = "8080"
 NODE_ENV = "production"
 
 [services.production.health.startup]
 path = "/api/healthz"
-
-[services.env]
-PORT = "22729"
-BASE_PATH = "/api/"
