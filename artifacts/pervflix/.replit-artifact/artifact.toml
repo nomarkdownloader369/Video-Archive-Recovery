@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "PervFlix"
+description = "A cinematic adult video streaming platform with a dark-themed interface for browsing curated videos, exploring categories and performers, and managing a personal watchlist."
+version = "1.0.0"
+id = "artifacts/pervflix"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22141
+
+[services.development]
+run = "pnpm --filter @workspace/pervflix run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/pervflix", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/pervflix/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22141"
+BASE_PATH = "/"
