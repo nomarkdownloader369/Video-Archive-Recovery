@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { thumbUrl, type Video } from "@/lib/videos";
 import { toggleWatchlist, isInWatchlist } from "@/lib/watchlist";
+import { getProxyThumb } from "@/lib/utils";
 
 function isRealUrl(seed: string) {
   return seed.startsWith("//") || seed.startsWith("http://") || seed.startsWith("https://");
@@ -108,10 +109,11 @@ export function VideoCard({ video }: { video: Video }) {
         {frames.map((src, idx) => (
           <img
             key={src}
-            src={src}
+            src={getProxyThumb(video.thumbnail_url || video.thumbnailUrl || video.cover_url || video.coverUrl || video.photo || src)}
             alt={video.title}
             referrerPolicy="no-referrer"
             loading="lazy"
+            onError={(e) => { e.currentTarget.style.display = "block"; }}
             className={
               "absolute inset-0 h-full w-full object-cover transition-all duration-300 group-hover:scale-105 " +
               (idx === frame ? "opacity-100" : "opacity-0")

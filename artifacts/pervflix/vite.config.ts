@@ -44,7 +44,18 @@ function backupCatalogMiddleware(req: import('node:http').IncomingMessage, res: 
   try {
     const parsed = new URL(req.url, 'http://localhost');
     const route = parsed.pathname.replace(/^\/api\/pf\/?/, '');
-    const videos = getBackupVideos().filter((video) => video.status !== 'deleted');
+    const videos = getBackupVideos()
+      .filter((video) => video.status !== 'deleted')
+      .map((video) => {
+        const thumbnail = video.thumbnail_url?.replace(/^http:\/\//i, 'https://') ?? null;
+        return {
+          ...video,
+          thumbnail_url: thumbnail,
+          thumbnailUrl: thumbnail,
+          cover_url: thumbnail,
+          coverUrl: thumbnail,
+        };
+      });
     if (route === 'videos') {
       const page = Math.max(1, Number(parsed.searchParams.get('page') ?? 1) || 1);
       const limit = Math.min(100, Math.max(1, Number(parsed.searchParams.get('limit') ?? 24) || 24));
@@ -65,20 +76,26 @@ function backupCatalogMiddleware(req: import('node:http').IncomingMessage, res: 
       return;
     }
     if (route === 'browse/categories') {
-      const counts = new Map<string, { name: string; video_count: number; thumbnail_url: string | null }>();
+      const counts = new Map<string, { name: string; video_count: number; photo: string | null; top_views: number }>();
       for (const video of videos) for (const label of [video.category, ...(video.tags ?? [])]) if (label) {
         const key = label.trim().toLowerCase();
-        const current = counts.get(key) ?? { name: key, video_count: 0, thumbnail_url: video.thumbnail_url ?? null };
-        current.video_count += 1; counts.set(key, current);
+        const current = counts.get(key) ?? { name: key, video_count: 0, photo: null, top_views: -1 };
+        current.video_count += 1;
+        const views = Number(video.views ?? 0);
+        if (views > current.top_views) { current.top_views = views; current.photo = video.thumbnail_url ?? null; }
+        counts.set(key, current);
       }
-      backupResponse(res, { data: [...counts.values()].sort((a, b) => b.video_count - a.video_count) }); return;
+      backupResponse(res, { data: [...counts.values()].map(({ top_views: _topViews, ...row }) => row).sort((a, b) => b.video_count - a.video_count) }); return;
     }
     if (route === 'browse/pornstars') {
-      const counts = new Map<string, { name: string; slug: string; video_count: number; total_views: number; photo: string | null }>();
+      const counts = new Map<string, { name: string; slug: string; video_count: number; total_views: number; photo: string | null; top_views: number }>();
       for (const video of videos) for (const raw of video.pornstars ?? []) if (raw.trim()) {
         const name = raw.trim(), key = name.toLowerCase();
-        const current = counts.get(key) ?? { name, slug: key.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), video_count: 0, total_views: 0, photo: video.thumbnail_url ?? null };
-        current.video_count += 1; current.total_views += Number(video.views ?? 0); counts.set(key, current);
+        const views = Number(video.views ?? 0);
+        const current = counts.get(key) ?? { name, slug: key.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), video_count: 0, total_views: 0, photo: null, top_views: -1 };
+        current.video_count += 1; current.total_views += views;
+        if (views > current.top_views) { current.top_views = views; current.photo = video.thumbnail_url ?? null; }
+        counts.set(key, current);
       }
       backupResponse(res, { data: [...counts.values()].sort((a, b) => b.video_count - a.video_count) }); return;
     }
@@ -102,6 +119,33 @@ export default defineConfig({
     {
       name: 'backup-catalog-middleware',
       configureServer(server) {
+        server.middlewares.use('/api/pf/thumb', async (req, res) => {
+          try {
+            const targetUrl = new URL(req.url ?? '', 'http://localhost').searchParams.get('url');
+            if (!targetUrl) {
+              res.statusCode = 400;
+              return res.end('Missing url');
+            }
+            const decodedUrl = targetUrl.replace(/^http:\/\//i, 'https://');
+            const origin = new URL(decodedUrl).origin;
+            const response = await fetch(decodedUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                Referer: `${origin}/`,
+                Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+              },
+            });
+            if (!response.ok) throw new Error('Fetch failed');
+            const arrayBuffer = await response.arrayBuffer();
+            res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            return res.end(Buffer.from(arrayBuffer));
+          } catch {
+            res.statusCode = 404;
+            return res.end();
+          }
+        });
         server.middlewares.use(backupCatalogMiddleware);
       },
     },

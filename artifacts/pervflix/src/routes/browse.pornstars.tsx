@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatCompactNumber } from "@/lib/performerStats";
 import { SIDEBAR_PERFORMERS } from "@/lib/performers";
+import { getProxyThumb } from "@/lib/utils";
 
 export const PERFORMER_WHITELIST = [
   "Wendy Raine",
@@ -48,35 +49,43 @@ function getInitials(name: string): string {
   return name.split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase();
 }
 
-/** Lookup map for static Unsplash fallback portraits (used when API hasn't loaded yet) */
-const WHITELIST_PORTRAITS = new Map(
-  SIDEBAR_PERFORMERS.map((p) => [p.name.toLowerCase(), p.portrait])
-);
+/** Catalog-backed fallback thumbnails for curated performers. */
+const WHITELIST_PORTRAITS = new Map<string, string>();
 
 /** Merge API performers with the curated whitelist, deduped by name */
-function mergePerformers(
-  apiList: Array<{ name: string; slug: string; videoCount?: number; totalViews?: number; photo?: string | null }>,
-) {
+type Performer = {
+  name: string;
+  slug: string;
+  videoCount?: number;
+  totalViews?: number;
+  photo?: string | null;
+  thumbnail_url?: string | null;
+  thumbnailUrl?: string | null;
+  cover_url?: string | null;
+  coverUrl?: string | null;
+};
+
+function mergePerformers(apiList: Performer[]) {
   const seen = new Set(apiList.map((p) => p.name.toLowerCase()));
-  const extras = SIDEBAR_PERFORMERS
+  const extras: Performer[] = SIDEBAR_PERFORMERS
     .filter((p) => !seen.has(p.name.toLowerCase()))
     .map((p) => ({
       name: p.name,
       slug: p.name.toLowerCase().replace(/\s+/g, "-"),
       videoCount: 0,
       totalViews: 0,
-      photo: p.portrait,   // static fallback while API hasn't loaded
+      photo: null,        // resolved from the catalog API when available
     }));
   return [...apiList, ...extras];
 }
 
 /**
  * Resolve portrait for a performer card.
- * Priority: API-provided dynamic photo → static whitelist portrait → null (initials).
+ * Priority: API-provided top-video thumbnail → initials.
  */
 function resolvePortrait(p: { name: string; photo?: string | null }): string | null {
   if (p.photo) return p.photo;
-  return WHITELIST_PORTRAITS.get(p.name.toLowerCase()) ?? null;
+  return null;
 }
 
 function BrowseAllPerformers() {
@@ -133,11 +142,12 @@ function BrowseAllPerformers() {
                     <span className="relative grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-black ring-2 ring-primary/40 shadow-[0_0_6px_rgba(230,0,0,0.5)] transition-all duration-300 group-hover:scale-105 group-hover:ring-primary/80 group-hover:shadow-[0_0_10px_rgba(230,0,0,0.7)]">
                       {portrait ? (
                         <img
-                          src={portrait}
+                          src={getProxyThumb(p.thumbnail_url || p.thumbnailUrl || p.cover_url || p.coverUrl || p.photo || portrait)}
                           alt={p.name}
                           referrerPolicy="no-referrer"
                           loading="lazy"
-                          className="h-full w-full object-cover object-top"
+                          className="w-full h-full object-cover object-top"
+                          onError={(e) => { e.currentTarget.style.display = "block"; }}
                         />
                       ) : (
                         <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-primary via-primary/70 to-primary/30 text-lg font-black text-white">
