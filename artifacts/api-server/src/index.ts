@@ -35,13 +35,7 @@ const EXPANDED_TABOO_QUERIES = [
 import type { Request, Response } from "express";
 import type { InsertVideo } from "@workspace/db";
 
-const rawPort = process.env["PORT"];
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
+const rawPort = process.env["PORT"] ?? "3001";
 
 const port = Number(rawPort);
 
@@ -770,9 +764,17 @@ async function deduplicateExistingVideos(): Promise<void> {
     })
     .from(videosTable);
 
+  type DedupRow = {
+    id: number;
+    title: string;
+    tags: string[] | null;
+    pornstars: string[] | null;
+  };
+  const typedRows = rows as DedupRow[];
+
   // Group rows by the re-derived unified slug.
-  const groups = new Map<string, typeof rows>();
-  for (const row of rows) {
+  const groups = new Map<string, DedupRow[]>();
+  for (const row of typedRows) {
     const key = generateUnifiedSlug(row.title);
     const bucket = groups.get(key);
     if (bucket) {

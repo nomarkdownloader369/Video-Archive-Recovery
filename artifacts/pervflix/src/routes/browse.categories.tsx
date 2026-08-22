@@ -94,6 +94,7 @@ function CategoryCard({ row }: { row: CategoryRow }) {
       <img
         src={imgSrc}
         alt={label}
+        referrerPolicy="no-referrer"
         loading="lazy"
         onError={handleImgError}
         className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"

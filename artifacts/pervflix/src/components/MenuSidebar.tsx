@@ -105,8 +105,9 @@ export function MenuSidebar({ trigger }: { trigger: ReactNode }) {
                   <img
                     src={photoMap.get(p.name.toLowerCase()) ?? p.portrait}
                     alt={p.name}
-                    className="h-full w-full object-cover object-top"
+                    referrerPolicy="no-referrer"
                     loading="lazy"
+                    className="h-full w-full object-cover object-top"
                   />
                 </span>
                 <span className="line-clamp-2 text-center text-[9px] font-semibold leading-tight text-foreground/75 transition-colors group-hover:text-primary">

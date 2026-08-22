@@ -133,16 +133,20 @@ function WatchPage() {
     }
   }
 
+  // Accept every API naming variant so a missing alias never produces a blank player.
+  const videoAliases = video as typeof video & { primaryEmbedUrl?: string | null; embedUrl?: string | null };
+  const embedUrl = videoAliases.primaryEmbedUrl || video.embed_url || videoAliases.embedUrl;
+
   // Direct MP4/video file — render with HTML5 <video>; everything else uses <iframe>.
   const isDirectVideo =
-    (video.embed_url?.toLowerCase().endsWith(".mp4") ||
-     video.embed_url?.toLowerCase().includes("video_file")) ??
+    (embedUrl?.toLowerCase().endsWith(".mp4") ||
+     embedUrl?.toLowerCase().includes("video_file")) ??
     false;
 
   // HQporner blocks playback when it sees a foreign referrer — send no-referrer.
   // External embed players (SpankBang, BoodLink, etc.) require a referrer to
   // authorise the embed — use the browser default (no-referrer-when-downgrade).
-  const isHQporner = video.embed_url?.toLowerCase().includes("hqporner") ?? false;
+  const isHQporner = embedUrl?.toLowerCase().includes("hqporner") ?? false;
   const referrerPolicyValue: React.IframeHTMLAttributes<HTMLIFrameElement>["referrerPolicy"] =
     isHQporner ? "no-referrer" : "no-referrer-when-downgrade";
 
@@ -153,11 +157,11 @@ function WatchPage() {
         <div className="min-w-0">
           {/* Player */}
           <div className="relative aspect-video w-full overflow-hidden rounded-sm border-none bg-black">
-            {video.embed_url ? (
+            {embedUrl ? (
               isDirectVideo ? (
                 /* Direct MP4 — HTML5 native player, no referrer restrictions */
                 <video
-                  src={video.embed_url}
+                  src={embedUrl}
                   controls
                   autoPlay
                   crossOrigin="anonymous"
@@ -167,11 +171,11 @@ function WatchPage() {
                 /* Iframe embed — dynamic referrer policy per source */
                 <iframe
                   key={video.id}
-                  src={video.embed_url}
+                  src={embedUrl}
                   title={video.title}
                   allowFullScreen
-                  allow="autoplay; fullscreen"
-                  className="absolute inset-0 h-full w-full border-0"
+                  allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                  className="absolute inset-0 h-full w-full rounded-md border-0"
                   referrerPolicy={referrerPolicyValue}
                 />
               )
@@ -180,6 +184,8 @@ function WatchPage() {
                 <img
                   src={thumbUrl(video.thumbSeed, 1600, 900)}
                   alt={video.title}
+                  referrerPolicy="no-referrer"
+                  loading="lazy"
                   className="h-full w-full object-cover opacity-60"
                 />
                 <div className="absolute inset-0 grid place-items-center">
