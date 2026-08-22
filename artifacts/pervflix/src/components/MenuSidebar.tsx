@@ -102,13 +102,19 @@ export function MenuSidebar({ trigger }: { trigger: ReactNode }) {
               >
                 {/* Portrait avatar — dynamic frame from the performer's top-viewed video */}
                 <span className="relative grid h-16 w-16 place-items-center overflow-hidden rounded-full bg-black ring-2 ring-primary/40 shadow-[0_0_6px_rgba(230,0,0,0.5)] transition-all duration-300 group-hover:scale-110 group-hover:ring-primary/80 group-hover:shadow-[0_0_10px_rgba(230,0,0,0.7)]">
-                  <img
-                    src={photoMap.get(p.name.toLowerCase()) ?? p.portrait}
-                    alt={p.name}
-                    referrerPolicy="no-referrer"
-                    loading="lazy"
-                    className="h-full w-full object-cover object-top"
-                  />
+                  {photoMap.get(p.name.toLowerCase()) ? (
+                    <img
+                      src={photoMap.get(p.name.toLowerCase())}
+                      alt={p.name}
+                      referrerPolicy="no-referrer"
+                      loading="lazy"
+                      className="h-full w-full object-cover object-top"
+                    />
+                  ) : (
+                    <span className="text-sm font-black text-primary" aria-label={p.name}>
+                      {p.initials}
+                    </span>
+                  )}
                 </span>
                 <span className="line-clamp-2 text-center text-[9px] font-semibold leading-tight text-foreground/75 transition-colors group-hover:text-primary">
                   {p.name}

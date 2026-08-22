@@ -84,6 +84,8 @@ function HeroSlider() {
               key={s.slug}
               src={thumbUrl(s.thumbSeed, 1600, 700)}
               alt={s.title}
+              referrerPolicy="no-referrer"
+              loading="lazy"
               className={
                 "absolute inset-0 h-full w-full object-cover transition-opacity duration-700 " +
                 (idx === i ? "opacity-100" : "opacity-0")

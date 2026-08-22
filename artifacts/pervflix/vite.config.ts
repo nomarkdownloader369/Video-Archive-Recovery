@@ -65,20 +65,26 @@ function backupCatalogMiddleware(req: import('node:http').IncomingMessage, res: 
       return;
     }
     if (route === 'browse/categories') {
-      const counts = new Map<string, { name: string; video_count: number; thumbnail_url: string | null }>();
+      const counts = new Map<string, { name: string; video_count: number; photo: string | null; top_views: number }>();
       for (const video of videos) for (const label of [video.category, ...(video.tags ?? [])]) if (label) {
         const key = label.trim().toLowerCase();
-        const current = counts.get(key) ?? { name: key, video_count: 0, thumbnail_url: video.thumbnail_url ?? null };
-        current.video_count += 1; counts.set(key, current);
+        const current = counts.get(key) ?? { name: key, video_count: 0, photo: null, top_views: -1 };
+        current.video_count += 1;
+        const views = Number(video.views ?? 0);
+        if (views > current.top_views) { current.top_views = views; current.photo = video.thumbnail_url ?? null; }
+        counts.set(key, current);
       }
-      backupResponse(res, { data: [...counts.values()].sort((a, b) => b.video_count - a.video_count) }); return;
+      backupResponse(res, { data: [...counts.values()].map(({ top_views: _topViews, ...row }) => row).sort((a, b) => b.video_count - a.video_count) }); return;
     }
     if (route === 'browse/pornstars') {
-      const counts = new Map<string, { name: string; slug: string; video_count: number; total_views: number; photo: string | null }>();
+      const counts = new Map<string, { name: string; slug: string; video_count: number; total_views: number; photo: string | null; top_views: number }>();
       for (const video of videos) for (const raw of video.pornstars ?? []) if (raw.trim()) {
         const name = raw.trim(), key = name.toLowerCase();
-        const current = counts.get(key) ?? { name, slug: key.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), video_count: 0, total_views: 0, photo: video.thumbnail_url ?? null };
-        current.video_count += 1; current.total_views += Number(video.views ?? 0); counts.set(key, current);
+        const views = Number(video.views ?? 0);
+        const current = counts.get(key) ?? { name, slug: key.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), video_count: 0, total_views: 0, photo: null, top_views: -1 };
+        current.video_count += 1; current.total_views += views;
+        if (views > current.top_views) { current.top_views = views; current.photo = video.thumbnail_url ?? null; }
+        counts.set(key, current);
       }
       backupResponse(res, { data: [...counts.values()].sort((a, b) => b.video_count - a.video_count) }); return;
     }

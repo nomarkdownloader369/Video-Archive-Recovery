@@ -48,10 +48,8 @@ function getInitials(name: string): string {
   return name.split(" ").map((w) => w[0] ?? "").join("").slice(0, 2).toUpperCase();
 }
 
-/** Lookup map for static Unsplash fallback portraits (used when API hasn't loaded yet) */
-const WHITELIST_PORTRAITS = new Map(
-  SIDEBAR_PERFORMERS.map((p) => [p.name.toLowerCase(), p.portrait])
-);
+/** Catalog-backed fallback thumbnails for curated performers. */
+const WHITELIST_PORTRAITS = new Map<string, string>();
 
 /** Merge API performers with the curated whitelist, deduped by name */
 function mergePerformers(
@@ -65,18 +63,18 @@ function mergePerformers(
       slug: p.name.toLowerCase().replace(/\s+/g, "-"),
       videoCount: 0,
       totalViews: 0,
-      photo: p.portrait,   // static fallback while API hasn't loaded
+      photo: null,        // resolved from the catalog API when available
     }));
   return [...apiList, ...extras];
 }
 
 /**
  * Resolve portrait for a performer card.
- * Priority: API-provided dynamic photo → static whitelist portrait → null (initials).
+ * Priority: API-provided top-video thumbnail → initials.
  */
 function resolvePortrait(p: { name: string; photo?: string | null }): string | null {
   if (p.photo) return p.photo;
-  return WHITELIST_PORTRAITS.get(p.name.toLowerCase()) ?? null;
+  return null;
 }
 
 function BrowseAllPerformers() {
