@@ -135,8 +135,9 @@ function BrowseAllPerformers() {
                         <img
                           src={portrait}
                           alt={p.name}
-                          className="h-full w-full object-cover object-top"
+                          referrerPolicy="no-referrer"
                           loading="lazy"
+                          className="h-full w-full object-cover object-top"
                         />
                       ) : (
                         <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-primary via-primary/70 to-primary/30 text-lg font-black text-white">

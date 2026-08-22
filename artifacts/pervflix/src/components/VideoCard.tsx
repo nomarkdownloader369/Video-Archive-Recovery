@@ -110,6 +110,7 @@ export function VideoCard({ video }: { video: Video }) {
             key={src}
             src={src}
             alt={video.title}
+            referrerPolicy="no-referrer"
             loading="lazy"
             className={
               "absolute inset-0 h-full w-full object-cover transition-all duration-300 group-hover:scale-105 " +
