@@ -56,6 +56,13 @@ export default defineConfig({
     strictPort: true,
     host: '0.0.0.0',
     allowedHosts: true,
+    proxy: {
+      '/api/pf': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+        rewrite: (requestPath) => requestPath.replace(/^\/api\/pf/, '/api'),
+      },
+    },
     fs: {
       strict: false,
     },
