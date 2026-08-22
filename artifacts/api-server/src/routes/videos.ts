@@ -10,8 +10,10 @@ import {
   asc,
   sql,
 } from "drizzle-orm";
+import { backupCategories, backupPerformers, findBackupVideo, getBackupVideos } from "../lib/backup-catalog";
 
 const router = Router();
+const USE_BACKUP_CATALOG = !process.env.DATABASE_URL;
 
 // ---------------------------------------------------------------------------
 // 39 curated taxonomy categories
@@ -79,6 +81,22 @@ router.get("/videos", async (req: Request, res: Response) => {
   const pageNum = Math.max(1, parseInt(page ?? "1", 10) || 1);
   const limitNum = Math.min(100, Math.max(1, parseInt(limit ?? "24", 10) || 24));
   const offset = (pageNum - 1) * limitNum;
+
+  if (USE_BACKUP_CATALOG) {
+    const all = getBackupVideos().filter((video) => video.status === "published");
+    const qNorm = q?.trim().toLowerCase();
+    const filtered = all.filter((video) => {
+      if (qNorm && !`${video.title} ${video.description ?? ""}`.toLowerCase().includes(qNorm)) return false;
+      if (category && video.category.toLowerCase() !== category.toLowerCase() && !video.tags.some((tag) => tag.toLowerCase() === category.toLowerCase())) return false;
+      if (studio && video.studio.toLowerCase() !== studio.toLowerCase()) return false;
+      if (pornstar && !video.pornstars.some((name) => name.toLowerCase() === pornstar.toLowerCase())) return false;
+      if (tag && !video.tags.some((value) => value.toLowerCase() === tag.toLowerCase().replace(/^#/, ""))) return false;
+      return true;
+    });
+    const sorted = [...filtered].sort((a, b) => sort === "views" ? b.views - a.views : sort === "oldest" ? a.id - b.id : b.id - a.id);
+    res.json({ data: sorted.slice(offset, offset + limitNum), pagination: { page: pageNum, limit: limitNum, total: sorted.length, pages: Math.ceil(sorted.length / limitNum) } });
+    return;
+  }
 
   const categoryNorm   = category?.toLowerCase().trim();
   const studioNorm     = studio?.toLowerCase().trim();
@@ -176,6 +194,13 @@ router.get("/videos", async (req: Request, res: Response) => {
 
 router.get("/videos/:slug", async (req: Request, res: Response) => {
   const slug = String(req.params["slug"]);
+
+  if (USE_BACKUP_CATALOG) {
+    const video = findBackupVideo(slug);
+    if (!video) { res.status(404).json({ error: "Video not found" }); return; }
+    res.json({ data: { ...video, primaryEmbedUrl: video.embed_url, embedUrl: video.embed_url, mirrors: video.mirrors ?? [] } });
+    return;
+  }
 
   const video = await db
     .select()
@@ -298,6 +323,11 @@ const PERFORMER_FALLBACK_PHOTO =
   "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80";
 
 router.get("/browse/pornstars", async (req: Request, res: Response) => {
+  if (USE_BACKUP_CATALOG) {
+    res.json({ data: backupPerformers().map((performer) => ({ ...performer, photo: performer.photo ? `${req.protocol}://${req.get("host")}/api/pf/thumb?url=${encodeURIComponent(performer.photo)}` : null })) });
+    return;
+  }
+
   // Fetch only the fields we need — avoids pulling full video rows
   const videos = await db
     .select({
@@ -378,6 +408,12 @@ const CATEGORY_FALLBACK_PHOTO =
   "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=600&q=80";
 
 router.get("/browse/categories", async (req: Request, res: Response) => {
+  if (USE_BACKUP_CATALOG) {
+    const BASE = req.protocol + "://" + req.get("host");
+    res.json({ data: backupCategories().map((category) => ({ name: category.name, video_count: category.video_count, thumbnail_url: category.thumbnail_url ? `${BASE}/api/pf/thumb?url=${encodeURIComponent(category.thumbnail_url)}` : null })) });
+    return;
+  }
+
   const rows = await db.execute<{
     label: string;
     video_count: string;
