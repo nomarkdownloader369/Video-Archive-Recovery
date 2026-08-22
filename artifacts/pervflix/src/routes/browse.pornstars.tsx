@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatCompactNumber } from "@/lib/performerStats";
 import { SIDEBAR_PERFORMERS } from "@/lib/performers";
+import { getProxyThumb } from "@/lib/utils";
 
 export const PERFORMER_WHITELIST = [
   "Wendy Raine",
@@ -141,7 +142,7 @@ function BrowseAllPerformers() {
                     <span className="relative grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-black ring-2 ring-primary/40 shadow-[0_0_6px_rgba(230,0,0,0.5)] transition-all duration-300 group-hover:scale-105 group-hover:ring-primary/80 group-hover:shadow-[0_0_10px_rgba(230,0,0,0.7)]">
                       {portrait ? (
                         <img
-                          src={p.thumbnail_url || p.thumbnailUrl || p.cover_url || p.coverUrl || p.photo || portrait}
+                          src={getProxyThumb(p.thumbnail_url || p.thumbnailUrl || p.cover_url || p.coverUrl || p.photo || portrait)}
                           alt={p.name}
                           referrerPolicy="no-referrer"
                           loading="lazy"

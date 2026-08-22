@@ -5,6 +5,7 @@ import { TRENDING, thumbUrl, type Video } from "@/lib/videos";
 import { api } from "@/lib/api";
 import { VideoCard } from "@/components/VideoCard";
 import { toggleWatchlist, isInWatchlist } from "@/lib/watchlist";
+import { getProxyThumb } from "@/lib/utils";
 
 const SORT_OPTIONS = [
   { label: "New",         value: "new"   },
@@ -82,7 +83,7 @@ function HeroSlider() {
           {heroSlides.map((s, idx) => (
             <img
               key={s.slug}
-              src={(s.thumbnail_url || s.thumbnailUrl || s.cover_url || s.coverUrl || s.photo || s.thumbSeed).replace(/^http:\/\//i, "https://")}
+              src={getProxyThumb(s.thumbnail_url || s.thumbnailUrl || s.cover_url || s.coverUrl || s.photo || s.thumbSeed)}
               alt={s.title}
               referrerPolicy="no-referrer"
               loading="lazy"

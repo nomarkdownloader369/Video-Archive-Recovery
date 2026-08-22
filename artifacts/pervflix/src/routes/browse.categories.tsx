@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { getProxyThumb } from "@/lib/utils";
 
 export const Route = createFileRoute("/browse/categories")({
   component: CategoriesPage,
@@ -48,7 +49,7 @@ function CategoryCard({ row }: { row: CategoryRow }) {
       {/* Highest-viewed catalog thumbnail for this category */}
       {imgSrc && (
         <img
-          src={row.thumbnail_url || row.thumbnailUrl || row.cover_url || row.coverUrl || row.photo || imgSrc || ""}
+          src={getProxyThumb(row.thumbnail_url || row.thumbnailUrl || row.cover_url || row.coverUrl || row.photo || imgSrc)}
           alt={label}
           referrerPolicy="no-referrer"
           loading="lazy"

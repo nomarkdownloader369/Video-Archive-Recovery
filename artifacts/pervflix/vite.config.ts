@@ -119,6 +119,33 @@ export default defineConfig({
     {
       name: 'backup-catalog-middleware',
       configureServer(server) {
+        server.middlewares.use('/api/pf/thumb', async (req, res) => {
+          try {
+            const targetUrl = new URL(req.url ?? '', 'http://localhost').searchParams.get('url');
+            if (!targetUrl) {
+              res.statusCode = 400;
+              return res.end('Missing url');
+            }
+            const decodedUrl = targetUrl.replace(/^http:\/\//i, 'https://');
+            const origin = new URL(decodedUrl).origin;
+            const response = await fetch(decodedUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                Referer: `${origin}/`,
+                Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+              },
+            });
+            if (!response.ok) throw new Error('Fetch failed');
+            const arrayBuffer = await response.arrayBuffer();
+            res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            return res.end(Buffer.from(arrayBuffer));
+          } catch {
+            res.statusCode = 404;
+            return res.end();
+          }
+        });
         server.middlewares.use(backupCatalogMiddleware);
       },
     },
