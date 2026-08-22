@@ -52,11 +52,21 @@ function getInitials(name: string): string {
 const WHITELIST_PORTRAITS = new Map<string, string>();
 
 /** Merge API performers with the curated whitelist, deduped by name */
-function mergePerformers(
-  apiList: Array<{ name: string; slug: string; videoCount?: number; totalViews?: number; photo?: string | null }>,
-) {
+type Performer = {
+  name: string;
+  slug: string;
+  videoCount?: number;
+  totalViews?: number;
+  photo?: string | null;
+  thumbnail_url?: string | null;
+  thumbnailUrl?: string | null;
+  cover_url?: string | null;
+  coverUrl?: string | null;
+};
+
+function mergePerformers(apiList: Performer[]) {
   const seen = new Set(apiList.map((p) => p.name.toLowerCase()));
-  const extras = SIDEBAR_PERFORMERS
+  const extras: Performer[] = SIDEBAR_PERFORMERS
     .filter((p) => !seen.has(p.name.toLowerCase()))
     .map((p) => ({
       name: p.name,
