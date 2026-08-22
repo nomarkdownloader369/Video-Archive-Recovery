@@ -12,6 +12,11 @@ export type Video = {
   quality: "4K" | "1080p" | "HD";
   description: string;
   thumbSeed: string;
+  thumbnail_url?: string | null;
+  thumbnailUrl?: string | null;
+  cover_url?: string | null;
+  coverUrl?: string | null;
+  photo?: string | null;
   tags: string[];
   embed_url?: string;
 };

@@ -9,6 +9,10 @@ interface CategoryRow {
   name: string;
   video_count: number;
   photo: string | null;
+  thumbnail_url?: string | null;
+  thumbnailUrl?: string | null;
+  cover_url?: string | null;
+  coverUrl?: string | null;
 }
 
 // Pretty-print category name (handle slugs like "big tits", "old/young")
@@ -23,9 +27,9 @@ function CategoryCard({ row }: { row: CategoryRow }) {
   const navigate = useNavigate();
   const [imgSrc, setImgSrc] = useState<string | null>(row.photo);
 
-  // Keep the card grounded in catalog data; hide the image if its direct URL fails.
-  function handleImgError() {
-    setImgSrc(null);
+  // Keep the card grounded in catalog data without removing the image element.
+  function handleImgError(event: React.SyntheticEvent<HTMLImageElement>) {
+    event.currentTarget.style.display = "block";
   }
 
   function handleClick() {
@@ -44,7 +48,7 @@ function CategoryCard({ row }: { row: CategoryRow }) {
       {/* Highest-viewed catalog thumbnail for this category */}
       {imgSrc && (
         <img
-          src={imgSrc}
+          src={row.thumbnail_url || row.thumbnailUrl || row.cover_url || row.coverUrl || row.photo || imgSrc || ""}
           alt={label}
           referrerPolicy="no-referrer"
           loading="lazy"

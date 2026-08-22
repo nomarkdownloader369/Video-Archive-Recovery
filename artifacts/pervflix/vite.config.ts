@@ -44,7 +44,18 @@ function backupCatalogMiddleware(req: import('node:http').IncomingMessage, res: 
   try {
     const parsed = new URL(req.url, 'http://localhost');
     const route = parsed.pathname.replace(/^\/api\/pf\/?/, '');
-    const videos = getBackupVideos().filter((video) => video.status !== 'deleted');
+    const videos = getBackupVideos()
+      .filter((video) => video.status !== 'deleted')
+      .map((video) => {
+        const thumbnail = video.thumbnail_url?.replace(/^http:\/\//i, 'https://') ?? null;
+        return {
+          ...video,
+          thumbnail_url: thumbnail,
+          thumbnailUrl: thumbnail,
+          cover_url: thumbnail,
+          coverUrl: thumbnail,
+        };
+      });
     if (route === 'videos') {
       const page = Math.max(1, Number(parsed.searchParams.get('page') ?? 1) || 1);
       const limit = Math.min(100, Math.max(1, Number(parsed.searchParams.get('limit') ?? 24) || 24));

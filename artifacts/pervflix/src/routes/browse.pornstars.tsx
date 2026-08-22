@@ -131,11 +131,12 @@ function BrowseAllPerformers() {
                     <span className="relative grid h-20 w-20 place-items-center overflow-hidden rounded-full bg-black ring-2 ring-primary/40 shadow-[0_0_6px_rgba(230,0,0,0.5)] transition-all duration-300 group-hover:scale-105 group-hover:ring-primary/80 group-hover:shadow-[0_0_10px_rgba(230,0,0,0.7)]">
                       {portrait ? (
                         <img
-                          src={portrait}
+                          src={p.thumbnail_url || p.thumbnailUrl || p.cover_url || p.coverUrl || p.photo || portrait}
                           alt={p.name}
                           referrerPolicy="no-referrer"
                           loading="lazy"
-                          className="h-full w-full object-cover object-top"
+                          className="w-full h-full object-cover object-top"
+                          onError={(e) => { e.currentTarget.style.display = "block"; }}
                         />
                       ) : (
                         <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-primary via-primary/70 to-primary/30 text-lg font-black text-white">

@@ -82,10 +82,11 @@ function HeroSlider() {
           {heroSlides.map((s, idx) => (
             <img
               key={s.slug}
-              src={thumbUrl(s.thumbSeed, 1600, 700)}
+              src={(s.thumbnail_url || s.thumbnailUrl || s.cover_url || s.coverUrl || s.photo || s.thumbSeed).replace(/^http:\/\//i, "https://")}
               alt={s.title}
               referrerPolicy="no-referrer"
               loading="lazy"
+              onError={(e) => { e.currentTarget.style.display = "block"; }}
               className={
                 "absolute inset-0 h-full w-full object-cover transition-opacity duration-700 " +
                 (idx === i ? "opacity-100" : "opacity-0")

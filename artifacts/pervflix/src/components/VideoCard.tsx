@@ -108,10 +108,11 @@ export function VideoCard({ video }: { video: Video }) {
         {frames.map((src, idx) => (
           <img
             key={src}
-            src={src}
+            src={video.thumbnail_url || video.thumbnailUrl || video.cover_url || video.coverUrl || video.photo || src}
             alt={video.title}
             referrerPolicy="no-referrer"
             loading="lazy"
+            onError={(e) => { e.currentTarget.style.display = "block"; }}
             className={
               "absolute inset-0 h-full w-full object-cover transition-all duration-300 group-hover:scale-105 " +
               (idx === frame ? "opacity-100" : "opacity-0")
