@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { thumbUrl, type Video } from "@/lib/videos";
+import { sanitizePerformers, thumbUrl, type Video } from "@/lib/videos";
 import { toggleWatchlist, isInWatchlist } from "@/lib/watchlist";
 import { getProxyThumb } from "@/lib/utils";
 
@@ -186,7 +186,7 @@ export function VideoCard({ video }: { video: Video }) {
         {/* Performer chips — crimson, clickable Links */}
         {video.stars.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
-            {video.stars.slice(0, 2).map((s) => (
+            {sanitizePerformers(video.stars).slice(0, 2).map((s) => (
               <Link
                 key={s}
                 to="/browse/pornstar/$name"

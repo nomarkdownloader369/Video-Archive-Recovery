@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { formatCompactNumber } from "@/lib/performerStats";
 import { SIDEBAR_PERFORMERS } from "@/lib/performers";
 import { getProxyThumb } from "@/lib/utils";
+import { sanitizePerformers } from "@/lib/videos";
 
 export const PERFORMER_WHITELIST = [
   "Wendy Raine",
@@ -95,7 +96,9 @@ function BrowseAllPerformers() {
     staleTime: 5 * 60_000,
   });
 
-  const list = mergePerformers(pornstars ?? []);
+  const list = mergePerformers(pornstars ?? []).filter((performer) =>
+    sanitizePerformers([performer.name]).length > 0,
+  );
 
   return (
     <div className="bg-background">

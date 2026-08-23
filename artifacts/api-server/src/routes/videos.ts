@@ -10,10 +10,21 @@ import {
   asc,
   sql,
 } from "drizzle-orm";
-import { backupCategories, backupPerformers, findBackupVideo, getBackupVideos } from "../lib/backup-catalog";
+import { backupCategories, backupPerformers, findBackupVideo, getBackupVideos, isVerifiedPerformerName } from "../lib/backup-catalog";
 
 const router = Router();
 const USE_BACKUP_CATALOG = !process.env.DATABASE_URL;
+
+// Keep scene metadata out of performer-facing responses, regardless of source.
+const INVALID_PERFORMER_TERMS = /(step|mom|dad|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient)/i;
+function isCatalogPerformer(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const name = value.trim();
+  return Boolean(name) && name.length <= 80 && !INVALID_PERFORMER_TERMS.test(name) && !/[^\\p{L}\\s]/u.test(name) && name.split(/\\s+/).length <= 3;
+}
+function cleanPerformers(values: unknown): string[] {
+  return [...new Set((Array.isArray(values) ? values : []).filter(isCatalogPerformer).map((name) => name.trim()))];
+}
 
 // ---------------------------------------------------------------------------
 // 39 curated taxonomy categories
@@ -83,18 +94,47 @@ router.get("/videos", async (req: Request, res: Response) => {
   const offset = (pageNum - 1) * limitNum;
 
   if (USE_BACKUP_CATALOG) {
-    const all = getBackupVideos().filter((video) => video.status === "published");
+    const all = getBackupVideos().filter((video) => video.status === "published").map((video) => ({
+      ...video,
+      pornstars: cleanPerformers(video.pornstars).filter(isVerifiedPerformerName),
+    }));
     const qNorm = q?.trim().toLowerCase();
     const filtered = all.filter((video) => {
       if (qNorm && !`${video.title} ${video.description ?? ""}`.toLowerCase().includes(qNorm)) return false;
       if (category && video.category.toLowerCase() !== category.toLowerCase() && !video.tags.some((tag) => tag.toLowerCase() === category.toLowerCase())) return false;
       if (studio && video.studio.toLowerCase() !== studio.toLowerCase()) return false;
-      if (pornstar && !video.pornstars.some((name) => name.toLowerCase() === pornstar.toLowerCase())) return false;
+      if (pornstar) {
+        const performerQuery = pornstar.toLowerCase().trim();
+        if (!video.pornstars.some((name) => {
+          const performer = name.toLowerCase().trim();
+          return performer === performerQuery || performer.includes(performerQuery);
+        })) return false;
+      }
       if (tag && !video.tags.some((value) => value.toLowerCase() === tag.toLowerCase().replace(/^#/, ""))) return false;
       return true;
     });
     const sorted = [...filtered].sort((a, b) => sort === "views" ? b.views - a.views : sort === "oldest" ? a.id - b.id : b.id - a.id);
-    res.json({ data: sorted.slice(offset, offset + limitNum), pagination: { page: pageNum, limit: limitNum, total: sorted.length, pages: Math.ceil(sorted.length / limitNum) } });
+    // Keep the latest feed visibly mixed across catalog sources, including FXPornHD.
+    const sourceOf = (video: typeof sorted[number]) => {
+      const haystack = `${video.embed_url ?? ""} ${video.thumbnail_url ?? ""} ${video.slug}`.toLowerCase();
+      return haystack.includes("fxpornhd") || haystack.includes("fx-") ? "fx" : haystack.includes("galaxyporn") ? "gp" : "hq";
+    };
+    const buckets = new Map<string, typeof sorted>();
+    for (const video of sorted) {
+      const source = sourceOf(video);
+      const bucket = buckets.get(source) ?? [];
+      bucket.push(video);
+      buckets.set(source, bucket);
+    }
+    const interleaved: typeof sorted = [];
+    while (buckets.size) {
+      for (const [source, bucket] of buckets) {
+        const next = bucket.shift();
+        if (next) interleaved.push(next);
+        if (!bucket.length) buckets.delete(source);
+      }
+    }
+    res.json({ data: interleaved.slice(offset, offset + limitNum), pagination: { page: pageNum, limit: limitNum, total: interleaved.length, pages: Math.ceil(interleaved.length / limitNum) } });
     return;
   }
 
@@ -349,7 +389,7 @@ router.get("/browse/pornstars", async (req: Request, res: Response) => {
   const performerMap = new Map<string, PerformerEntry>();
 
   for (const video of videos) {
-    const stars = video.pornstars ?? [];
+    const stars = cleanPerformers(video.pornstars);
     for (const raw of stars) {
       if (!raw) continue;
       const name = raw.trim();
@@ -402,10 +442,6 @@ router.get("/browse/pornstars", async (req: Request, res: Response) => {
 
   res.json({ data });
 });
-
-// Generic dark fallback served directly (no proxy) for zero-count categories.
-const CATEGORY_FALLBACK_PHOTO =
-  "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=600&q=80";
 
 router.get("/browse/categories", async (req: Request, res: Response) => {
   if (USE_BACKUP_CATALOG) {
@@ -503,7 +539,7 @@ router.get("/browse/categories", async (req: Request, res: Response) => {
       video_count: count,
       photo: count > 0 && thumb
         ? `${BASE}/api/pf/thumb?url=${encodeURIComponent(thumb)}`
-        : CATEGORY_FALLBACK_PHOTO,
+        : null,
     };
   });
 

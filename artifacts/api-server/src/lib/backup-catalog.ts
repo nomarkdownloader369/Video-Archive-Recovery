@@ -30,6 +30,33 @@ const BACKUP_PATHS = [
 ];
 let cached: BackupVideo[] | null = null;
 
+const PERFORMER_BLOCKLIST = /(step|mom|dad|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient)/i;
+
+/** Strict shape gate shared by ingestion and every API response. */
+function hasPerformerShape(value: string): boolean {
+  const name = value.trim();
+  return Boolean(name) && name.length <= 80 && !PERFORMER_BLOCKLIST.test(name) && !(/[^\p{L}\s]/u.test(name)) && name.split(/\s+/).length <= 3;
+}
+
+/** Dynamic whitelist populated from the verified performer records in the catalog. */
+export const PERFORMER_WHITELIST = new Set<string>();
+
+export function isVerifiedPerformerName(value: string): boolean {
+  const name = value.trim();
+  if (!hasPerformerShape(name)) return false;
+  if (PERFORMER_WHITELIST.size === 0) {
+    const rows = cached ?? getBackupVideos();
+    for (const performer of rows.flatMap((video) => video.pornstars ?? [])) {
+      if (hasPerformerShape(performer)) PERFORMER_WHITELIST.add(performer.toLowerCase());
+    }
+  }
+  return PERFORMER_WHITELIST.has(name.toLowerCase());
+}
+
+function verifiedPerformers(values: string[] | null | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter(isVerifiedPerformerName))];
+}
+
 export function getBackupVideos(): BackupVideo[] {
   if (!cached) {
     const backupPath = BACKUP_PATHS.find((candidate) => fs.existsSync(candidate));
@@ -38,6 +65,14 @@ export function getBackupVideos(): BackupVideo[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) throw new Error("backup.json must contain an array");
     cached = parsed.filter((video): video is BackupVideo => Boolean(video && typeof video === "object"));
+    PERFORMER_WHITELIST.clear();
+    for (const performer of cached.flatMap((video) => video.pornstars ?? [])) {
+      if (hasPerformerShape(performer)) PERFORMER_WHITELIST.add(performer.trim().toLowerCase());
+    }
+    cached = cached.map((video) => ({
+      ...video,
+      pornstars: verifiedPerformers(video.pornstars),
+    }));
   }
   return cached;
 }
@@ -47,17 +82,24 @@ export function findBackupVideo(slug: string) {
 }
 
 export function backupCategories() {
-  const map = new Map<string, { name: string; video_count: number; thumbnail_url: string | null }>();
+  const map = new Map<string, { name: string; video_count: number; candidates: { url: string; views: number }[] }>();
   for (const video of getBackupVideos()) {
     const labels = [video.category, ...video.tags].filter(Boolean).map((label) => label.trim().toLowerCase());
     for (const name of new Set(labels)) {
-      const current = map.get(name) ?? { name, video_count: 0, thumbnail_url: video.thumbnail_url };
+      const current = map.get(name) ?? { name, video_count: 0, candidates: [] };
       current.video_count += 1;
-      if (!current.thumbnail_url) current.thumbnail_url = video.thumbnail_url;
+      if (video.thumbnail_url) current.candidates.push({ url: video.thumbnail_url, views: video.views ?? 0 });
       map.set(name, current);
     }
   }
-  return [...map.values()].sort((a, b) => b.video_count - a.video_count || a.name.localeCompare(b.name));
+  const usedThumbnails = new Set<string>();
+  return [...map.values()]
+    .sort((a, b) => b.video_count - a.video_count || a.name.localeCompare(b.name))
+    .map(({ candidates, ...category }) => {
+      const thumbnail_url = candidates.sort((a, b) => b.views - a.views).find(({ url }) => !usedThumbnails.has(url))?.url ?? null;
+      if (thumbnail_url) usedThumbnails.add(thumbnail_url);
+      return { ...category, thumbnail_url };
+    });
 }
 
 export function backupPerformers() {

@@ -1,3 +1,11 @@
+const PERFORMER_BLOCKLIST = /(step|mom|dad|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient)/i;
+export function sanitizePerformers(values: unknown): string[] {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter((name) => Boolean(name) && name.length <= 80 && !PERFORMER_BLOCKLIST.test(name) && !/[^\p{L}\s]/u.test(name) && name.split(/\s+/).length <= 3))];
+}
+
 export type Video = {
   id: number;
   slug: string;

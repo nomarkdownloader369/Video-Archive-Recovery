@@ -389,7 +389,7 @@ interface ScrapedVideo {
   tags: string[];
   pornstars: string[];
   status: string;
-  /** Internal — matched family keyword, used for studio fallback after detail-page enrichment. Not persisted. */
+  /** Internal ��� matched family keyword, used for studio fallback after detail-page enrichment. Not persisted. */
   _familyKeyword?: string | null;
   /** Internal — original raw title before UI cleaning, used for studio-prefix matching and performer extraction. Not persisted. */
   _rawTitle?: string;
@@ -479,7 +479,7 @@ async function fetchDetailPage(sourceUrl: string): Promise<{
       const href = $(el).attr("href") ?? "";
       const name = $(el).text().trim();
       if (!name || seen.has(name)) return;
-      if (href.includes("/actress/") || href.includes("/pornstar/") || href.includes("/models/")) {
+      if (href.includes("/actress/") || href.includes("/pornstar/") || href.includes("/model/") || href.includes("/models/")) {
         if (name.split(" ").length > 3 || name.length > 28) return;
         seen.add(name);
         performers.push(name);
