@@ -160,8 +160,7 @@ function WatchPage() {
           <div className="relative aspect-video w-full overflow-hidden rounded-sm border-none bg-black">
             <iframe
               key={video.id}
-              src={videoAliases.primaryEmbedUrl || video.embed_url || videoAliases.embedUrl || undefined}
-              title={video.title}
+              src={(video as Video & { primaryEmbedUrl?: string; embedUrl?: string }).primaryEmbedUrl || video.embed_url || (video as Video & { embedUrl?: string }).embedUrl || undefined}
               allowFullScreen
               allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
               className="w-full h-full border-0 rounded-md"
