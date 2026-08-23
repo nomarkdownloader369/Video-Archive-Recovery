@@ -165,7 +165,6 @@ function WatchPage() {
               allowFullScreen
               allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
               className="w-full h-full border-0 rounded-md"
-              referrerPolicy={referrerPolicyValue}
             />
             {/* Quality badge — pulsing red dot */}
             <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/80 rounded-full px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold tracking-wider text-white uppercase shadow-md">
