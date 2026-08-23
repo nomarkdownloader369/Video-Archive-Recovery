@@ -31,6 +31,7 @@ function BrowsePornstar() {
     try { return decodeURIComponent(rawName); } catch { return rawName; }
   })();
 
+  const performerQuery = name.replace(/[-_]+/g, " ").trim();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/browse/pornstar/$name" });
   const currentPage = search.page ?? 1;
@@ -38,7 +39,7 @@ function BrowsePornstar() {
   const { data, isLoading } = useQuery({
     queryKey: ["pornstar-videos", name, currentPage],
     queryFn: () =>
-      api.listVideos({ pornstar: encodeURIComponent(name), page: currentPage, limit: 24, sort: "new" }),
+      api.listVideos({ pornstar: performerQuery, page: currentPage, limit: 24, sort: "new" }),
     enabled: !!name,
   });
 

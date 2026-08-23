@@ -15,6 +15,17 @@ import { backupCategories, backupPerformers, findBackupVideo, getBackupVideos, i
 const router = Router();
 const USE_BACKUP_CATALOG = !process.env.DATABASE_URL;
 
+// Keep scene metadata out of performer-facing responses, regardless of source.
+const INVALID_PERFORMER_TERMS = /(step|mom|dad|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient)/i;
+function isCatalogPerformer(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const name = value.trim();
+  return Boolean(name) && name.length <= 80 && !INVALID_PERFORMER_TERMS.test(name) && !/[^\\p{L}\\s]/u.test(name) && name.split(/\\s+/).length <= 3;
+}
+function cleanPerformers(values: unknown): string[] {
+  return [...new Set((Array.isArray(values) ? values : []).filter(isCatalogPerformer).map((name) => name.trim()))];
+}
+
 // ---------------------------------------------------------------------------
 // 39 curated taxonomy categories
 // ---------------------------------------------------------------------------
@@ -85,7 +96,7 @@ router.get("/videos", async (req: Request, res: Response) => {
   if (USE_BACKUP_CATALOG) {
     const all = getBackupVideos().filter((video) => video.status === "published").map((video) => ({
       ...video,
-      pornstars: video.pornstars.filter(isVerifiedPerformerName),
+      pornstars: cleanPerformers(video.pornstars).filter(isVerifiedPerformerName),
     }));
     const qNorm = q?.trim().toLowerCase();
     const filtered = all.filter((video) => {
@@ -378,7 +389,7 @@ router.get("/browse/pornstars", async (req: Request, res: Response) => {
   const performerMap = new Map<string, PerformerEntry>();
 
   for (const video of videos) {
-    const stars = video.pornstars ?? [];
+    const stars = cleanPerformers(video.pornstars);
     for (const raw of stars) {
       if (!raw) continue;
       const name = raw.trim();
