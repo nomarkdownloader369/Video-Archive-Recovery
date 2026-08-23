@@ -30,6 +30,27 @@ const BACKUP_PATHS = [
 ];
 let cached: BackupVideo[] | null = null;
 
+/** Exact performer pool derived from verified database/catalog performer rows. */
+let verifiedPerformerPool: Set<string> | null = null;
+
+export function isVerifiedPerformerName(value: string): boolean {
+  const name = value.trim();
+  if (!name || name.length > 80) return false;
+  if (!verifiedPerformerPool) {
+    const rows = cached ?? getBackupVideos();
+    verifiedPerformerPool = new Set(
+      rows.flatMap((video) => video.pornstars ?? [])
+        .map((performer) => performer.trim().toLowerCase())
+        .filter(Boolean),
+    );
+  }
+  return verifiedPerformerPool.has(name.toLowerCase());
+}
+
+function verifiedPerformers(values: string[] | null | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter(isVerifiedPerformerName))];
+}
+
 export function getBackupVideos(): BackupVideo[] {
   if (!cached) {
     const backupPath = BACKUP_PATHS.find((candidate) => fs.existsSync(candidate));
@@ -38,6 +59,15 @@ export function getBackupVideos(): BackupVideo[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) throw new Error("backup.json must contain an array");
     cached = parsed.filter((video): video is BackupVideo => Boolean(video && typeof video === "object"));
+    verifiedPerformerPool = new Set(
+      cached.flatMap((video) => video.pornstars ?? [])
+        .map((performer) => performer.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    cached = cached.map((video) => ({
+      ...video,
+      pornstars: verifiedPerformers(video.pornstars),
+    }));
   }
   return cached;
 }
@@ -47,17 +77,24 @@ export function findBackupVideo(slug: string) {
 }
 
 export function backupCategories() {
-  const map = new Map<string, { name: string; video_count: number; thumbnail_url: string | null }>();
+  const map = new Map<string, { name: string; video_count: number; candidates: { url: string; views: number }[] }>();
   for (const video of getBackupVideos()) {
     const labels = [video.category, ...video.tags].filter(Boolean).map((label) => label.trim().toLowerCase());
     for (const name of new Set(labels)) {
-      const current = map.get(name) ?? { name, video_count: 0, thumbnail_url: video.thumbnail_url };
+      const current = map.get(name) ?? { name, video_count: 0, candidates: [] };
       current.video_count += 1;
-      if (!current.thumbnail_url) current.thumbnail_url = video.thumbnail_url;
+      if (video.thumbnail_url) current.candidates.push({ url: video.thumbnail_url, views: video.views ?? 0 });
       map.set(name, current);
     }
   }
-  return [...map.values()].sort((a, b) => b.video_count - a.video_count || a.name.localeCompare(b.name));
+  const usedThumbnails = new Set<string>();
+  return [...map.values()]
+    .sort((a, b) => b.video_count - a.video_count || a.name.localeCompare(b.name))
+    .map(({ candidates, ...category }) => {
+      const thumbnail_url = candidates.sort((a, b) => b.views - a.views).find(({ url }) => !usedThumbnails.has(url))?.url ?? null;
+      if (thumbnail_url) usedThumbnails.add(thumbnail_url);
+      return { ...category, thumbnail_url };
+    });
 }
 
 export function backupPerformers() {

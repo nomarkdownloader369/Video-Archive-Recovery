@@ -1,6 +1,6 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { thumbUrl, type Video } from "@/lib/videos";
+import { type Video } from "@/lib/videos";
 import { api } from "@/lib/api";
 import { VideoCard } from "@/components/VideoCard";
 import { toggleWatchlist, isInWatchlist } from "@/lib/watchlist";
@@ -157,55 +157,15 @@ function WatchPage() {
         <div className="min-w-0">
           {/* Player */}
           <div className="relative aspect-video w-full overflow-hidden rounded-sm border-none bg-black">
-            {embedUrl ? (
-              isDirectVideo ? (
-                /* Direct MP4 — HTML5 native player, no referrer restrictions */
-                <video
-                  src={embedUrl}
-                  controls
-                  autoPlay
-                  crossOrigin="anonymous"
-                  className="absolute inset-0 h-full w-full rounded-md bg-black"
-                />
-              ) : (
-                /* Iframe embed — dynamic referrer policy per source */
-                <iframe
-                  key={video.id}
-                  src={embedUrl}
-                  title={video.title}
-                  allowFullScreen
-                  allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                  className="absolute inset-0 h-full w-full rounded-md border-0"
-                  referrerPolicy={referrerPolicyValue}
-                />
-              )
-            ) : (
-              <>
-                <img
-                  src={thumbUrl(video.thumbSeed, 1600, 900)}
-                  alt={video.title}
-                  referrerPolicy="no-referrer"
-                  loading="lazy"
-                  className="h-full w-full object-cover opacity-60"
-                />
-                <div className="absolute inset-0 grid place-items-center">
-                  <button className="flex items-center gap-3 rounded-sm bg-primary px-6 py-4 text-sm font-bold uppercase tracking-wider text-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)] transition-transform hover:scale-105">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                    {(() => {
-                      const dur =
-                        video.duration && video.duration !== "0:00"
-                          ? video.duration
-                          : video.duration_seconds > 0
-                            ? formatDuration(video.duration_seconds)
-                            : null;
-                      return dur ? `Play Full Film • ${dur}` : "Play Full Film";
-                    })()}
-                  </button>
-                </div>
-              </>
-            )}
+            <iframe
+              key={video.id}
+              src={embedUrl || "about:blank"}
+              title={video.title}
+              allowFullScreen
+              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+              className="absolute inset-0 h-full w-full border-0 rounded-md"
+              referrerPolicy={referrerPolicyValue}
+            />
             {/* Quality badge — pulsing red dot */}
             <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/80 rounded-full px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold tracking-wider text-white uppercase shadow-md">
               <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-[#E60000] animate-pulse"></span>

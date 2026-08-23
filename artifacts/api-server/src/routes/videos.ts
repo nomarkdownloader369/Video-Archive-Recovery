@@ -10,7 +10,7 @@ import {
   asc,
   sql,
 } from "drizzle-orm";
-import { backupCategories, backupPerformers, findBackupVideo, getBackupVideos } from "../lib/backup-catalog";
+import { backupCategories, backupPerformers, findBackupVideo, getBackupVideos, isVerifiedPerformerName } from "../lib/backup-catalog";
 
 const router = Router();
 const USE_BACKUP_CATALOG = !process.env.DATABASE_URL;
@@ -83,7 +83,10 @@ router.get("/videos", async (req: Request, res: Response) => {
   const offset = (pageNum - 1) * limitNum;
 
   if (USE_BACKUP_CATALOG) {
-    const all = getBackupVideos().filter((video) => video.status === "published");
+    const all = getBackupVideos().filter((video) => video.status === "published").map((video) => ({
+      ...video,
+      pornstars: video.pornstars.filter(isVerifiedPerformerName),
+    }));
     const qNorm = q?.trim().toLowerCase();
     const filtered = all.filter((video) => {
       if (qNorm && !`${video.title} ${video.description ?? ""}`.toLowerCase().includes(qNorm)) return false;
@@ -94,7 +97,27 @@ router.get("/videos", async (req: Request, res: Response) => {
       return true;
     });
     const sorted = [...filtered].sort((a, b) => sort === "views" ? b.views - a.views : sort === "oldest" ? a.id - b.id : b.id - a.id);
-    res.json({ data: sorted.slice(offset, offset + limitNum), pagination: { page: pageNum, limit: limitNum, total: sorted.length, pages: Math.ceil(sorted.length / limitNum) } });
+    // Keep the latest feed visibly mixed across catalog sources, including FXPornHD.
+    const sourceOf = (video: typeof sorted[number]) => {
+      const haystack = `${video.embed_url ?? ""} ${video.thumbnail_url ?? ""} ${video.slug}`.toLowerCase();
+      return haystack.includes("fxpornhd") || haystack.includes("fx-") ? "fx" : haystack.includes("galaxyporn") ? "gp" : "hq";
+    };
+    const buckets = new Map<string, typeof sorted>();
+    for (const video of sorted) {
+      const source = sourceOf(video);
+      const bucket = buckets.get(source) ?? [];
+      bucket.push(video);
+      buckets.set(source, bucket);
+    }
+    const interleaved: typeof sorted = [];
+    while (buckets.size) {
+      for (const [source, bucket] of buckets) {
+        const next = bucket.shift();
+        if (next) interleaved.push(next);
+        if (!bucket.length) buckets.delete(source);
+      }
+    }
+    res.json({ data: interleaved.slice(offset, offset + limitNum), pagination: { page: pageNum, limit: limitNum, total: interleaved.length, pages: Math.ceil(interleaved.length / limitNum) } });
     return;
   }
 
