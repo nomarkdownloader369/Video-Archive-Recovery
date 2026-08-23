@@ -7,6 +7,7 @@ import { toggleWatchlist, isInWatchlist } from "@/lib/watchlist";
 
 export const Route = createFileRoute("/video/$slug")({
   loader: async ({ params }): Promise<{ video: Video; related: Video[] }> => {
+    const slug = params.slug;
     const [video, paged] = await Promise.all([
       api.getVideo(params.slug),
       api
@@ -159,7 +160,7 @@ function WatchPage() {
           <div className="relative aspect-video w-full overflow-hidden rounded-sm border-none bg-black">
             <iframe
               key={video.id}
-              src={embedUrl || "about:blank"}
+              src={videoAliases.primaryEmbedUrl || video.embed_url || videoAliases.embedUrl || undefined}
               title={video.title}
               allowFullScreen
               allow="autoplay; fullscreen; encrypted-media; picture-in-picture"

@@ -30,19 +30,23 @@ const BACKUP_PATHS = [
 ];
 let cached: BackupVideo[] | null = null;
 
-/** Exact performer pool derived from verified database/catalog performer rows. */
+const PERFORMER_BLOCKLIST = /(step|mom|dad|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient)/i;
+
+/** Strict shape gate shared by ingestion and every API response. */
+function hasPerformerShape(value: string): boolean {
+  const name = value.trim();
+  return Boolean(name) && name.length <= 80 && !PERFORMER_BLOCKLIST.test(name) && !(/[^\p{L}\s]/u.test(name)) && name.split(/\s+/).length <= 3;
+}
+
+/** Exact performer pool derived from the verified database/catalog performer rows. */
 let verifiedPerformerPool: Set<string> | null = null;
 
 export function isVerifiedPerformerName(value: string): boolean {
   const name = value.trim();
-  if (!name || name.length > 80) return false;
+  if (!hasPerformerShape(name)) return false;
   if (!verifiedPerformerPool) {
     const rows = cached ?? getBackupVideos();
-    verifiedPerformerPool = new Set(
-      rows.flatMap((video) => video.pornstars ?? [])
-        .map((performer) => performer.trim().toLowerCase())
-        .filter(Boolean),
-    );
+    verifiedPerformerPool = new Set(rows.flatMap((video) => video.pornstars ?? []).filter(hasPerformerShape).map((performer) => performer.toLowerCase()));
   }
   return verifiedPerformerPool.has(name.toLowerCase());
 }

@@ -92,7 +92,13 @@ router.get("/videos", async (req: Request, res: Response) => {
       if (qNorm && !`${video.title} ${video.description ?? ""}`.toLowerCase().includes(qNorm)) return false;
       if (category && video.category.toLowerCase() !== category.toLowerCase() && !video.tags.some((tag) => tag.toLowerCase() === category.toLowerCase())) return false;
       if (studio && video.studio.toLowerCase() !== studio.toLowerCase()) return false;
-      if (pornstar && !video.pornstars.some((name) => name.toLowerCase() === pornstar.toLowerCase())) return false;
+      if (pornstar) {
+        const performerQuery = pornstar.toLowerCase().trim();
+        if (!video.pornstars.some((name) => {
+          const performer = name.toLowerCase().trim();
+          return performer === performerQuery || performer.includes(performerQuery);
+        })) return false;
+      }
       if (tag && !video.tags.some((value) => value.toLowerCase() === tag.toLowerCase().replace(/^#/, ""))) return false;
       return true;
     });
@@ -426,10 +432,6 @@ router.get("/browse/pornstars", async (req: Request, res: Response) => {
   res.json({ data });
 });
 
-// Generic dark fallback served directly (no proxy) for zero-count categories.
-const CATEGORY_FALLBACK_PHOTO =
-  "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=600&q=80";
-
 router.get("/browse/categories", async (req: Request, res: Response) => {
   if (USE_BACKUP_CATALOG) {
     const BASE = req.protocol + "://" + req.get("host");
@@ -526,7 +528,7 @@ router.get("/browse/categories", async (req: Request, res: Response) => {
       video_count: count,
       photo: count > 0 && thumb
         ? `${BASE}/api/pf/thumb?url=${encodeURIComponent(thumb)}`
-        : CATEGORY_FALLBACK_PHOTO,
+        : null,
     };
   });
 
