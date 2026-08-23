@@ -130,7 +130,16 @@ function CategoriesPage() {
       })
       .then(({ data }) => {
         if (!cancelled) {
-          setRows(data);
+          const assignedThumbnails = new Set<string>();
+          const uniqueRows = (data as CategoryRow[]).map((row) => {
+            const candidate = row.thumbnail_url || row.thumbnailUrl || row.cover_url || row.coverUrl || row.photo;
+            if (!candidate || assignedThumbnails.has(candidate)) {
+              return { ...row, photo: null, thumbnail_url: null };
+            }
+            assignedThumbnails.add(candidate);
+            return { ...row, photo: candidate, thumbnail_url: candidate };
+          });
+          setRows(uniqueRows);
           setLoading(false);
         }
       })

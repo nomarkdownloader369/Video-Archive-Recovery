@@ -164,7 +164,7 @@ function WatchPage() {
               title={video.title}
               allowFullScreen
               allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-              className="absolute inset-0 h-full w-full border-0 rounded-md"
+              className="w-full h-full border-0 rounded-md"
               referrerPolicy={referrerPolicyValue}
             />
             {/* Quality badge — pulsing red dot */}

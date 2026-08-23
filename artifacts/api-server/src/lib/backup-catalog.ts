@@ -38,17 +38,19 @@ function hasPerformerShape(value: string): boolean {
   return Boolean(name) && name.length <= 80 && !PERFORMER_BLOCKLIST.test(name) && !(/[^\p{L}\s]/u.test(name)) && name.split(/\s+/).length <= 3;
 }
 
-/** Exact performer pool derived from the verified database/catalog performer rows. */
-let verifiedPerformerPool: Set<string> | null = null;
+/** Dynamic whitelist populated from the verified performer records in the catalog. */
+export const PERFORMER_WHITELIST = new Set<string>();
 
 export function isVerifiedPerformerName(value: string): boolean {
   const name = value.trim();
   if (!hasPerformerShape(name)) return false;
-  if (!verifiedPerformerPool) {
+  if (PERFORMER_WHITELIST.size === 0) {
     const rows = cached ?? getBackupVideos();
-    verifiedPerformerPool = new Set(rows.flatMap((video) => video.pornstars ?? []).filter(hasPerformerShape).map((performer) => performer.toLowerCase()));
+    for (const performer of rows.flatMap((video) => video.pornstars ?? [])) {
+      if (hasPerformerShape(performer)) PERFORMER_WHITELIST.add(performer.toLowerCase());
+    }
   }
-  return verifiedPerformerPool.has(name.toLowerCase());
+  return PERFORMER_WHITELIST.has(name.toLowerCase());
 }
 
 function verifiedPerformers(values: string[] | null | undefined): string[] {
@@ -63,11 +65,10 @@ export function getBackupVideos(): BackupVideo[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) throw new Error("backup.json must contain an array");
     cached = parsed.filter((video): video is BackupVideo => Boolean(video && typeof video === "object"));
-    verifiedPerformerPool = new Set(
-      cached.flatMap((video) => video.pornstars ?? [])
-        .map((performer) => performer.trim().toLowerCase())
-        .filter(Boolean),
-    );
+    PERFORMER_WHITELIST.clear();
+    for (const performer of cached.flatMap((video) => video.pornstars ?? [])) {
+      if (hasPerformerShape(performer)) PERFORMER_WHITELIST.add(performer.trim().toLowerCase());
+    }
     cached = cached.map((video) => ({
       ...video,
       pornstars: verifiedPerformers(video.pornstars),
