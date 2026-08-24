@@ -443,13 +443,37 @@ async function flushBuffer(): Promise<void> {
 
 function extractEmbedUrlFromHtml(html: string): string | null {
   const $ = cheerio.load(html);
-  const src = $("#playerWrapper iframe").first().attr("src") ?? "";
-  if (src && (src.includes("mydaddy.cc") || src.includes("hqporner.com/embed"))) {
-    return src.startsWith("//") ? `https:${src}` : src;
-  }
-  const altMatch = html.match(/altplayer\.php\?i=(\/\/(?:mydaddy\.cc|hqporner\.com\/embed)[^'"]+)/);
-  if (altMatch?.[1]) return `https:${altMatch[1]}`;
-  return null;
+  const normalize = (raw: string): string | null => {
+    const value = raw.trim();
+    if (!value) return null;
+    const absolute = value.startsWith("//") ? `https:${value}` : new URL(value, FX_BASE).toString();
+    try {
+      const parsed = new URL(absolute);
+      if (!/^https?:$/i.test(parsed.protocol)) return null;
+      const host = parsed.hostname.toLowerCase();
+      const isKnownPlayer = host === "player.fxpornhd.com" || host.endsWith("hqporner.com") || host === "mydaddy.cc";
+      if (!isKnownPlayer) return null;
+      // Never persist a source/article URL as an embed. FX player URLs are
+      // accepted only on their canonical /embed/ route.
+      if (host === "player.fxpornhd.com" && !parsed.pathname.startsWith("/embed/")) {
+        const id = parsed.pathname.match(/(?:video|player|watch)\/?([^/]+)/i)?.[1];
+        if (!id) return null;
+        parsed.pathname = `/embed/${id}`;
+        parsed.search = "";
+      }
+      if (host.endsWith("hqporner.com") && !parsed.pathname.startsWith("/embed/")) return null;
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  };
+  let embedUrl: string | null = null;
+  $("#playerWrapper iframe[src], iframe[src]").each((_: number, el: any) => {
+    if (!embedUrl) embedUrl = normalize($(el).attr("src") ?? "");
+  });
+  if (embedUrl) return embedUrl;
+  const altMatch = html.match(/altplayer\\.php\\?i=([^'"&]+)/i);
+  return altMatch?.[1] ? normalize(decodeURIComponent(altMatch[1])) : null;
 }
 
 async function fetchDetailPage(sourceUrl: string): Promise<{
@@ -2200,7 +2224,7 @@ const UNIVERSAL_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: st
   puretaboo:            { categories: ["TABOO", "EROTIC", "DRAMA"],                tags: ["puretaboo", "taboo"] },
   sweetsinner:          { categories: ["TABOO", "EROTIC", "DRAMA"],                tags: ["puretaboo", "taboo"] },
 
-  // ── Cuckold ───────────────────────────────────────────────────────────────
+  // ── Cuckold ─────────────────────────────────────────────────────────���─────
   cuck4k:               { categories: ["CUCKOLD", "TABOO", "FETISH"],              tags: ["cuckold", "taboo", "fetish"] },
   cuckoldsessions:      { categories: ["CUCKOLD", "TABOO", "FETISH"],              tags: ["cuckold", "taboo", "fetish"] },
 

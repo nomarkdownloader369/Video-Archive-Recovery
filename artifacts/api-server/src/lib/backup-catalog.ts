@@ -22,6 +22,8 @@ export type BackupVideo = {
   created_at: string;
   updated_at: string;
   mirrors?: { name: string; url: string }[];
+  primaryEmbedUrl?: string | null;
+  embedUrl?: string | null;
 };
 
 const BACKUP_PATHS = [
@@ -29,6 +31,21 @@ const BACKUP_PATHS = [
   path.resolve(process.cwd(), "backup.json"),
 ];
 let cached: BackupVideo[] | null = null;
+
+function repairEmbedUrl(video: BackupVideo): string | null {
+  const raw = video.primaryEmbedUrl ?? video.embed_url ?? video.embedUrl ?? null;
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (!/fxpornhd/i.test(`${url.hostname}${url.pathname}`)) return raw;
+    if (url.hostname.toLowerCase() === "player.fxpornhd.com" && url.pathname.startsWith("/embed/")) return url.toString();
+    const id = url.pathname.match(/(?:embed|video|player|watch)\/?([^/]+)/i)?.[1] ?? url.pathname.split("/").filter(Boolean).pop();
+    if (!id) return null;
+    return `https://player.fxpornhd.com/embed/${encodeURIComponent(id)}`;
+  } catch {
+    return null;
+  }
+}
 
 const PERFORMER_BLOCKLIST = /\b(?:step(?:mom|dad|sister|brother)?|mom(?:my)?|dad(?:dy)?|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient|pornstars?|categories?|tags?)\b/i;
 
@@ -69,10 +86,16 @@ export function getBackupVideos(): BackupVideo[] {
     for (const performer of cached.flatMap((video) => video.pornstars ?? [])) {
       if (hasPerformerShape(performer)) PERFORMER_WHITELIST.add(performer.trim().toLowerCase());
     }
-    cached = cached.map((video) => ({
-      ...video,
-      pornstars: verifiedPerformers(video.pornstars),
-    }));
+    cached = cached.map((video) => {
+      const repaired = repairEmbedUrl(video);
+      return {
+        ...video,
+        embed_url: repaired,
+        primaryEmbedUrl: repaired,
+        embedUrl: repaired,
+        pornstars: verifiedPerformers(video.pornstars),
+      };
+    });
   }
   return cached;
 }
