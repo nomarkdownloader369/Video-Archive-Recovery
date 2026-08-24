@@ -30,7 +30,7 @@ const BACKUP_PATHS = [
 ];
 let cached: BackupVideo[] | null = null;
 
-const PERFORMER_BLOCKLIST = /(step|mom|dad|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient)/i;
+const PERFORMER_BLOCKLIST = /\b(?:step(?:mom|dad|sister|brother)?|mom(?:my)?|dad(?:dy)?|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient|pornstars?|categories?|tags?)\b/i;
 
 /** Strict shape gate shared by ingestion and every API response. */
 function hasPerformerShape(value: string): boolean {

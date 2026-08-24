@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatCompactNumber } from "@/lib/performerStats";
-import { SIDEBAR_PERFORMERS } from "@/lib/performers";
 import { getProxyThumb } from "@/lib/utils";
 import { sanitizePerformers } from "@/lib/videos";
 
@@ -67,17 +66,9 @@ type Performer = {
 };
 
 function mergePerformers(apiList: Performer[]) {
-  const seen = new Set(apiList.map((p) => p.name.toLowerCase()));
-  const extras: Performer[] = SIDEBAR_PERFORMERS
-    .filter((p) => !seen.has(p.name.toLowerCase()))
-    .map((p) => ({
-      name: p.name,
-      slug: p.name.toLowerCase().replace(/\s+/g, "-"),
-      videoCount: 0,
-      totalViews: 0,
-      photo: null,        // resolved from the catalog API when available
-    }));
-  return [...apiList, ...extras];
+  // The API catalog is authoritative. Do not append the sidebar seed list:
+  // it contains editorial placeholders that can be scene labels, not people.
+  return apiList;
 }
 
 /**

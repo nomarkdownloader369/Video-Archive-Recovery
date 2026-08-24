@@ -31,6 +31,14 @@ function getBackupVideos() {
   return backupVideos;
 }
 
+const INVALID_PERFORMER_TERMS = /\b(?:step(?:mom|dad|sister|brother|son|daughter)?|mom(?:my)?|dad(?:dy)?|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient|pornstars?|categories?|tags?)\b/i;
+function cleanPerformers(values: unknown): string[] {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter((name) => Boolean(name) && name.length <= 80 && !INVALID_PERFORMER_TERMS.test(name) && !/[^\p{L}\s]/u.test(name) && name.split(/\s+/).length <= 3))];
+}
+
 function backupResponse(res: import('node:http').ServerResponse, payload: unknown, status = 200) {
   const body = JSON.stringify(payload);
   res.statusCode = status;
@@ -50,6 +58,7 @@ function backupCatalogMiddleware(req: import('node:http').IncomingMessage, res: 
         const thumbnail = video.thumbnail_url?.replace(/^http:\/\//i, 'https://') ?? null;
         return {
           ...video,
+          pornstars: cleanPerformers(video.pornstars),
           thumbnail_url: thumbnail,
           thumbnailUrl: thumbnail,
           cover_url: thumbnail,
@@ -74,8 +83,30 @@ function backupCatalogMiddleware(req: import('node:http').IncomingMessage, res: 
         })) &&
         (!tag || video.tags?.some((value) => value.toLowerCase() === tag)),
       );
+      const mixed = !query && !category && !studio && !performer && !tag
+        ? (() => {
+            const groups = new Map<string, BackupVideo[]>();
+            for (const video of filtered) {
+              const key = /fxpornhd\\.com/i.test(String(video.thumbnail_url ?? '')) ? 'fxpornhd' : /hqporner/i.test(String(video.thumbnail_url ?? '')) ? 'hqporner' : /galaxyporn/i.test(String(video.thumbnail_url ?? '')) ? 'galaxyporn' : 'other';
+              const group = groups.get(key) ?? [];
+              group.push(video);
+              groups.set(key, group);
+            }
+            const result: BackupVideo[] = [];
+            const keys = [...groups.keys()];
+            for (let index = 0; result.length < filtered.length; index += 1) {
+              let added = false;
+              for (const key of keys) {
+                const video = groups.get(key)?.[index];
+                if (video) { result.push(video); added = true; }
+              }
+              if (!added) break;
+            }
+            return result;
+          })()
+        : filtered;
       const start = (page - 1) * limit;
-      backupResponse(res, { data: filtered.slice(start, start + limit), pagination: { page, limit, total: filtered.length, pages: Math.ceil(filtered.length / limit) } });
+      backupResponse(res, { data: mixed.slice(start, start + limit), pagination: { page, limit, total: mixed.length, pages: Math.ceil(mixed.length / limit) } });
       return;
     }
     if (route === 'browse/categories') {

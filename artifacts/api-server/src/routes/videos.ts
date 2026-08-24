@@ -16,7 +16,7 @@ const router = Router();
 const USE_BACKUP_CATALOG = !process.env.DATABASE_URL;
 
 // Keep scene metadata out of performer-facing responses, regardless of source.
-const INVALID_PERFORMER_TERMS = /(step|mom|dad|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient)/i;
+const INVALID_PERFORMER_TERMS = /\b(?:step(?:mom|dad|sister|brother)?|mom(?:my)?|dad(?:dy)?|sister|brother|aunt|uncle|son|daughter|family|bff|neighbor|couch|roommate|teacher|student|doctor|patient|pornstars?|categories?|tags?)\b/i;
 function isCatalogPerformer(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const name = value.trim();
