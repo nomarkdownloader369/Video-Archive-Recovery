@@ -2193,7 +2193,7 @@ const UNIVERSAL_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: st
   fillupmymom:          { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf", "creampie"] },
   hijabmylfs:           { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "milf", "hijab", "mature"] },
 
-  // ── Family / Taboo (general) ──────────────────────���───────────────────────
+  // ── Family / Taboo (general) ──────────────────────�����───────────────────────
   familystrokes:        { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
   familytherapy:        { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
   dadcrush:             { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
@@ -2379,6 +2379,8 @@ function extractFXPornHDMeta(html: string, title = ""): {
   const PREFERRED_PLAYER_PATTERNS = [
     "player.fxpornhd.com/embed",
     "fxpornhd.com/embed",
+    "cdn.pornkx.com/embed/",
+    "watchstreamus.com/embed/",
     "embedsb.com",
     "doodstream.com/e/",
     "streamtape.com/e/",
