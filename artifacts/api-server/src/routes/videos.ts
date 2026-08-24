@@ -20,7 +20,7 @@ const INVALID_PERFORMER_TERMS = /(step|mom|dad|sister|brother|aunt|uncle|son|dau
 function isCatalogPerformer(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const name = value.trim();
-  return Boolean(name) && name.length <= 80 && !INVALID_PERFORMER_TERMS.test(name) && !/[^\\p{L}\\s]/u.test(name) && name.split(/\\s+/).length <= 3;
+  return Boolean(name) && name.length <= 80 && !INVALID_PERFORMER_TERMS.test(name) && !/[^\p{L}\s]/u.test(name) && name.split(/\s+/).length <= 3;
 }
 function cleanPerformers(values: unknown): string[] {
   return [...new Set((Array.isArray(values) ? values : []).filter(isCatalogPerformer).map((name) => name.trim()))];

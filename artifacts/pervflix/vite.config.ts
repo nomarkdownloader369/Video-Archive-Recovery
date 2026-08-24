@@ -62,13 +62,16 @@ function backupCatalogMiddleware(req: import('node:http').IncomingMessage, res: 
       const query = parsed.searchParams.get('q')?.trim().toLowerCase();
       const category = parsed.searchParams.get('category')?.toLowerCase();
       const studio = parsed.searchParams.get('studio')?.toLowerCase();
-      const pornstar = parsed.searchParams.get('pornstar')?.toLowerCase();
+      const performer = (parsed.searchParams.get('performer') ?? parsed.searchParams.get('pornstar'))?.trim().toLowerCase();
       const tag = parsed.searchParams.get('tag')?.replace(/^#/, '').toLowerCase();
       const filtered = videos.filter((video) =>
         (!query || `${video.title} ${video.description ?? ''}`.toLowerCase().includes(query)) &&
         (!category || video.category?.toLowerCase() === category || video.tags?.some((value) => value.toLowerCase() === category)) &&
         (!studio || video.studio?.toLowerCase() === studio) &&
-        (!pornstar || video.pornstars?.some((value) => value.toLowerCase() === pornstar)) &&
+        (!performer || video.pornstars?.some((value) => {
+          const candidate = value.trim().toLowerCase();
+          return candidate === performer || candidate.includes(performer);
+        })) &&
         (!tag || video.tags?.some((value) => value.toLowerCase() === tag)),
       );
       const start = (page - 1) * limit;
@@ -76,16 +79,23 @@ function backupCatalogMiddleware(req: import('node:http').IncomingMessage, res: 
       return;
     }
     if (route === 'browse/categories') {
-      const counts = new Map<string, { name: string; video_count: number; photo: string | null; top_views: number }>();
+      const counts = new Map<string, { name: string; video_count: number; candidates: { url: string; views: number }[] }>();
       for (const video of videos) for (const label of [video.category, ...(video.tags ?? [])]) if (label) {
         const key = label.trim().toLowerCase();
-        const current = counts.get(key) ?? { name: key, video_count: 0, photo: null, top_views: -1 };
+        const current = counts.get(key) ?? { name: key, video_count: 0, candidates: [] };
         current.video_count += 1;
-        const views = Number(video.views ?? 0);
-        if (views > current.top_views) { current.top_views = views; current.photo = video.thumbnail_url ?? null; }
+        if (video.thumbnail_url) current.candidates.push({ url: video.thumbnail_url, views: Number(video.views ?? 0) });
         counts.set(key, current);
       }
-      backupResponse(res, { data: [...counts.values()].map(({ top_views: _topViews, ...row }) => row).sort((a, b) => b.video_count - a.video_count) }); return;
+      const assignedThumbnails = new Set<string>();
+      const data = [...counts.values()]
+        .sort((a, b) => b.video_count - a.video_count || a.name.localeCompare(b.name))
+        .map(({ candidates, ...row }) => {
+          const photo = candidates.sort((a, b) => b.views - a.views).find(({ url }) => !assignedThumbnails.has(url))?.url ?? null;
+          if (photo) assignedThumbnails.add(photo);
+          return { ...row, photo };
+        });
+      backupResponse(res, { data }); return;
     }
     if (route === 'browse/pornstars') {
       const counts = new Map<string, { name: string; slug: string; video_count: number; total_views: number; photo: string | null; top_views: number }>();
