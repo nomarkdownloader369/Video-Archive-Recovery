@@ -2193,7 +2193,7 @@ const UNIVERSAL_STUDIO_TAXONOMY: Record<string, { categories: string[]; tags: st
   fillupmymom:          { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "stepmom", "milf", "creampie"] },
   hijabmylfs:           { categories: ["FAMILY", "TABOO", "STEPMOM", "MILF"],      tags: ["taboo", "milf", "hijab", "mature"] },
 
-  // ── Family / Taboo (general) ──────────────────────────────────────────────
+  // ── Family / Taboo (general) ──────────────────────���───────────────────────
   familystrokes:        { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
   familytherapy:        { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
   dadcrush:             { categories: ["FAMILY", "TABOO"],                         tags: ["taboo", "family"] },
@@ -2372,9 +2372,10 @@ function extractFXPornHDMeta(html: string, title = ""): {
   const $ = cheerio.load(html);
 
   // ── Embed URL ──────────────────────────────────────────────────────────────
+  // Only accept a player URL from an iframe attribute. Never use the article
+  // URL as an embed: that is the source of FXPornHD's X-Frame-Options/403 bug.
   let embedUrl = "";
 
-  // Priority 1: dedicated FXPornHD player or known open embed players
   const PREFERRED_PLAYER_PATTERNS = [
     "player.fxpornhd.com/embed",
     "fxpornhd.com/embed",
@@ -2384,34 +2385,60 @@ function extractFXPornHDMeta(html: string, title = ""): {
     "mixdrop.co/e/",
   ];
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $("iframe[src]").each((_: number, el: any) => {
-    if (embedUrl) return; // already found
-    const src = $(el).attr("src") ?? "";
-    if (!src.startsWith("http")) return;
-    if (PREFERRED_PLAYER_PATTERNS.some((p) => src.includes(p))) {
-      embedUrl = src;
-    }
-  });
+  function canonicalEmbedUrl(raw: string): string | null {
+    try {
+      const url = new URL(raw.trim(), FX_BASE);
+      if (url.protocol !== "https:") return null;
+      const host = url.hostname.toLowerCase();
+      const pathName = url.pathname.replace(/\/+$/, "");
+      const isFXHost = host === "fxpornhd.com" || host.endsWith(".fxpornhd.com");
+      const isKnownPlayer = PREFERRED_PLAYER_PATTERNS.some((pattern) =>
+        `${host}${pathName}`.toLowerCase().includes(pattern),
+      );
 
-  // Priority 2: any https iframe
-  if (!embedUrl) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    $("iframe[src]").each((_: number, el: any) => {
-      if (embedUrl) return;
-      const src = $(el).attr("src") ?? "";
-      if (src.startsWith("https://")) embedUrl = src;
-    });
+      // A source article/detail URL is never a player URL. Convert only when
+      // its path contains a stable video identifier we can safely preserve.
+      if (isFXHost && !isKnownPlayer) return null;
+      if (isFXHost && host !== "player.fxpornhd.com") {
+        const id = pathName.match(/\/(?:video|watch|player|embed)\/([^/]+)/i)?.[1];
+        if (!id) return null;
+        return `https://player.fxpornhd.com/embed/${encodeURIComponent(id)}`;
+      }
+      if (host === "player.fxpornhd.com" && !/^\/embed\//i.test(pathName)) {
+        const id = pathName.match(/\/(?:video|watch|player)\/([^/]+)/i)?.[1];
+        if (!id) return null;
+        return `https://player.fxpornhd.com/embed/${encodeURIComponent(id)}`;
+      }
+      return url.toString();
+    } catch {
+      return null;
+    }
   }
 
-  // Priority 3: data-src (lazy-loaded iframes)
+  function considerEmbed(raw: string): void {
+    if (embedUrl) return;
+    const candidate = canonicalEmbedUrl(raw);
+    if (candidate) embedUrl = candidate;
+  }
+
+  // Prefer dedicated/open player if the page exposes more than one iframe.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  $("iframe[src]").each((_: number, el: any) => {
+    const src = $(el).attr("src") ?? "";
+    if (PREFERRED_PLAYER_PATTERNS.some((p) => src.toLowerCase().includes(p))) considerEmbed(src);
+  });
+
+  // Then accept another HTTPS iframe, but still pass it through the strict
+  // article-vs-player gate above.
   if (!embedUrl) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    $("iframe[data-src]").each((_: number, el: any) => {
-      if (embedUrl) return;
-      const src = $(el).attr("data-src") ?? "";
-      if (src.startsWith("http")) embedUrl = src;
-    });
+    $("iframe[src]").each((_: number, el: any) => considerEmbed($(el).attr("src") ?? ""));
+  }
+
+  // Lazy-loaded players use data-src rather than src.
+  if (!embedUrl) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    $("iframe[data-src]").each((_: number, el: any) => considerEmbed($(el).attr("data-src") ?? ""));
   }
 
   // ── Duration ──────────────────────────────────────────────────────────────

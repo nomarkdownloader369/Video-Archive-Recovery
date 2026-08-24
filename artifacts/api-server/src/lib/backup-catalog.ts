@@ -38,8 +38,15 @@ function repairEmbedUrl(video: BackupVideo): string | null {
   try {
     const url = new URL(raw);
     if (!/fxpornhd/i.test(`${url.hostname}${url.pathname}`)) return raw;
-    if (url.hostname.toLowerCase() === "player.fxpornhd.com" && url.pathname.startsWith("/embed/")) return url.toString();
-    const id = url.pathname.match(/(?:embed|video|player|watch)\/?([^/]+)/i)?.[1] ?? url.pathname.split("/").filter(Boolean).pop();
+
+    const host = url.hostname.toLowerCase();
+    const pathName = url.pathname.replace(/\/+$/, "");
+    if (host === "player.fxpornhd.com" && /^\/embed\//i.test(pathName)) return url.toString();
+
+    // Backup rows may contain an older FX article URL. Convert only URLs with
+    // an explicit player/video identifier; never expose the article itself as
+    // an iframe source. If there is no identifier, the row has no safe embed.
+    const id = pathName.match(/\/(?:embed|video|watch|player)\/([^/]+)/i)?.[1];
     if (!id) return null;
     return `https://player.fxpornhd.com/embed/${encodeURIComponent(id)}`;
   } catch {
