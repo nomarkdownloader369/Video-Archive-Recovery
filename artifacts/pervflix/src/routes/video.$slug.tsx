@@ -134,22 +134,14 @@ function WatchPage() {
     }
   }
 
-  // Accept every API naming variant so a missing alias never produces a blank player.
-  const videoAliases = video as typeof video & { primaryEmbedUrl?: string | null; embedUrl?: string | null };
-  const embedUrl = videoAliases.primaryEmbedUrl || video.embed_url || videoAliases.embedUrl;
-
-  // Direct MP4/video file — render with HTML5 <video>; everything else uses <iframe>.
-  const isDirectVideo =
-    (embedUrl?.toLowerCase().endsWith(".mp4") ||
-     embedUrl?.toLowerCase().includes("video_file")) ??
-    false;
-
-  // HQporner blocks playback when it sees a foreign referrer — send no-referrer.
-  // External embed players (SpankBang, BoodLink, etc.) require a referrer to
-  // authorise the embed — use the browser default (no-referrer-when-downgrade).
-  const isHQporner = embedUrl?.toLowerCase().includes("hqporner") ?? false;
-  const referrerPolicyValue: React.IframeHTMLAttributes<HTMLIFrameElement>["referrerPolicy"] =
-    isHQporner ? "no-referrer" : "no-referrer-when-downgrade";
+  const videoAliases = video as typeof video & {
+    primaryEmbedUrl?: string | null;
+    embedUrl?: string | null;
+    videoUrl?: string | null;
+  };
+  const embedUrl = videoAliases.primaryEmbedUrl || video.embed_url || videoAliases.embedUrl || "";
+  const directVideoUrl = videoAliases.videoUrl || "";
+  const isDirectVideo = /\.(?:mp4|webm|ogg|m3u8)(?:$|[?#])/i.test(directVideoUrl);
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
@@ -158,19 +150,45 @@ function WatchPage() {
         <div className="min-w-0">
           {/* Player */}
           <div className="relative aspect-video w-full overflow-hidden rounded-sm border-none bg-black">
-            <iframe
-              key={video.id}
-              src={(video as Video & { primaryEmbedUrl?: string; embedUrl?: string }).primaryEmbedUrl || video.embed_url || (video as Video & { embedUrl?: string }).embedUrl || undefined}
-              allowFullScreen
-              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-              className="w-full h-full border-0 rounded-md"
-            />
+            {isDirectVideo ? (
+              <video
+                controls
+                playsInline
+                className="h-full w-full"
+                src={directVideoUrl}
+              >
+                Your browser does not support embedded video playback.
+              </video>
+            ) : (
+              <iframe
+                key={video.id}
+                src={videoAliases.primaryEmbedUrl || video.embed_url || undefined}
+                allowFullScreen
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                referrerPolicy="no-referrer"
+                className="h-full w-full border-0"
+                title={video.title}
+              />
+            )}
             {/* Quality badge — pulsing red dot */}
             <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/80 rounded-full px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold tracking-wider text-white uppercase shadow-md">
               <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-[#E60000] animate-pulse"></span>
               {playerQualityText}
             </div>
           </div>
+
+          {embedUrl && (
+            <div className="mt-3 flex justify-end">
+              <a
+                href={embedUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center rounded-sm border border-primary/40 bg-primary/10 px-3 py-2 text-xs font-bold uppercase tracking-wide text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+              >
+                Watch Direct Stream / Server 2
+              </a>
+            </div>
+          )}
 
           {/* Metadata row */}
           <div className="mt-5">
