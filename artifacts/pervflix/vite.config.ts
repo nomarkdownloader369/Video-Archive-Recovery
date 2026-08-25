@@ -87,7 +87,8 @@ function backupCatalogMiddleware(req: import('node:http').IncomingMessage, res: 
         ? (() => {
             const groups = new Map<string, BackupVideo[]>();
             for (const video of filtered) {
-              const key = /fxpornhd\\.com/i.test(String(video.thumbnail_url ?? '')) ? 'fxpornhd' : /hqporner/i.test(String(video.thumbnail_url ?? '')) ? 'hqporner' : /galaxyporn/i.test(String(video.thumbnail_url ?? '')) ? 'galaxyporn' : 'other';
+              const sourceText = `${String(video.source ?? '')} ${String(video.source_url ?? '')} ${String(video.url ?? '')} ${String(video.embed_url ?? '')} ${String(video.thumbnail_url ?? '')} ${video.slug}`.toLowerCase();
+              const key = /fxpornhd\.com|fxpornhd|fxporn/i.test(sourceText) ? 'fxpornhd' : /hqporner/i.test(sourceText) ? 'hqporner' : /galaxyporn/i.test(sourceText) ? 'galaxyporn' : 'other';
               const group = groups.get(key) ?? [];
               group.push(video);
               groups.set(key, group);
