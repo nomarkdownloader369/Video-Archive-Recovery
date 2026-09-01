@@ -142,6 +142,8 @@ function WatchPage() {
   const embedUrl = videoAliases.primaryEmbedUrl || video.embed_url || videoAliases.embedUrl || "";
   const directVideoUrl = videoAliases.videoUrl || "";
   const isDirectVideo = /\.(?:mp4|webm|ogg|m3u8)(?:$|[?#])/i.test(directVideoUrl);
+  const isGalaxyPlayer = /(?:galaxy|4meplayer|upns)/i.test(embedUrl);
+  const playerReferrerPolicy = isGalaxyPlayer ? "no-referrer-when-downgrade" : "strict-origin-when-cross-origin";
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
@@ -165,7 +167,7 @@ function WatchPage() {
                 src={videoAliases.primaryEmbedUrl || video.embed_url || undefined}
                 allowFullScreen
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                referrerPolicy="strict-origin-when-cross-origin"
+                referrerPolicy={playerReferrerPolicy}
                 className="h-full w-full border-0"
                 title={video.title}
               />
