@@ -165,7 +165,7 @@ function WatchPage() {
                 src={videoAliases.primaryEmbedUrl || video.embed_url || undefined}
                 allowFullScreen
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                referrerPolicy="no-referrer"
+                referrerPolicy="strict-origin-when-cross-origin"
                 className="h-full w-full border-0"
                 title={video.title}
               />
