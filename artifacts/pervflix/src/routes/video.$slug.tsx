@@ -161,8 +161,8 @@ function WatchPage() {
               </video>
             ) : (
               <iframe
-                key={video.id}
-                src={videoAliases.primaryEmbedUrl || video.embed_url || undefined}
+                key={`${video.id}:${embedUrl}`}
+                src={embedUrl || undefined}
                 allowFullScreen
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
                 className="h-full w-full border-0"
