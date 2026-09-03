@@ -451,7 +451,14 @@ function extractEmbedUrlFromHtml(html: string): string | null {
       const parsed = new URL(absolute);
       if (!/^https?:$/i.test(parsed.protocol)) return null;
       const host = parsed.hostname.toLowerCase();
-      const isKnownPlayer = host === "player.fxpornhd.com" || host.endsWith("hqporner.com") || host === "mydaddy.cc";
+      const isKnownPlayer =
+        host === "player.fxpornhd.com" ||
+        host.endsWith("hqporner.com") ||
+        host === "mydaddy.cc" ||
+        host === "galaxy.4meplayer.pro" ||
+        host === "galaxy.upns.online" ||
+        host === "news.upns.pro" ||
+        host === "sport.seekplays.com";
       if (!isKnownPlayer) return null;
       // Never persist a source/article URL as an embed. FX player URLs are
       // accepted only on their canonical /embed/ route.
@@ -2385,6 +2392,10 @@ function extractFXPornHDMeta(html: string, title = ""): {
     "doodstream.com/e/",
     "streamtape.com/e/",
     "mixdrop.co/e/",
+    "galaxy.4meplayer.pro",
+    "galaxy.upns.online",
+    "news.upns.pro",
+    "sport.seekplays.com",
   ];
 
   function canonicalEmbedUrl(raw: string): string | null {
